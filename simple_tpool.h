@@ -7,6 +7,7 @@
 #endif //THREADINGC_SIMPLE_TPOOL_H
 
 #include <stddef.h>
+#include <stdbool.h>
 
 // the thread pool
 typedef struct tpool* threadpool;

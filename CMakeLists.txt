@@ -3,4 +3,4 @@ project(ThreadingC C)
 
 set(CMAKE_C_STANDARD 99)
 
-add_executable(ThreadingC main.c simple_tpool.h simple_tpool.c)
+add_executable(ThreadingC simple_tpool.h simple_tpool.c test.c)
