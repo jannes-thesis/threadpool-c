@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include "simple_tpool.h"
 
 /* ================== data structures ==================== */
@@ -36,12 +37,10 @@ typedef struct tpool {
 
 /* ==================== Prototypes ==================== */
 
-static void init_jobqueue(jobqueue* jq, size_t size);
+static void init_jobqueue(jobqueue* jq);
 static job* pop_next_job(jobqueue* jobqueue_ptr);
 static void push_new_job(jobqueue* jobqueue_ptr, job* new_job_ptr);
-
 static job* create_job(tfunc fun_ptr, void* arg_ptr);
-
 static void worker_function(tpool* tpool_ptr);
 
 
@@ -54,7 +53,7 @@ tpool* tpool_create(size_t size) {
     if (tpool_ptr == NULL) {
         return NULL;
     }
-    init_jobqueue(&(tpool_ptr->jobqueue), size);
+    init_jobqueue(&(tpool_ptr->jobqueue));
     if (&(tpool_ptr->jobqueue) == NULL) {
         free(tpool_ptr);
         return NULL;
@@ -114,20 +113,22 @@ void tpool_wait(tpool* tpool_ptr) {
 void tpool_destroy(tpool* tpool_ptr) {
     if (tpool_ptr == NULL) return;
 
-    jobqueue queue = tpool_ptr->jobqueue;
-    pthread_mutex_t* queue_mutex_ptr = &(queue.access_mutex);
-    pthread_cond_t* queue_cond_ptr = &(queue.non_empty_cond);
+    jobqueue* queue_ptr = &tpool_ptr->jobqueue;
+    pthread_mutex_t* queue_mutex_ptr = &(queue_ptr->access_mutex);
+    pthread_cond_t* queue_cond_ptr = &(queue_ptr->non_empty_cond);
 
     tpool_ptr->stopping = true;
 
+    printf("destroy: clear queue\n");
     // lock work queue and clear it
     pthread_mutex_lock(queue_mutex_ptr);
-    job* to_free = queue.first;
+    job* to_free = queue_ptr->first;
     while (to_free != NULL) {
         job* new_to_free = to_free->next;
         free(to_free);
         to_free = new_to_free;
     }
+    printf("destroy: signal blocked threads\n");
     // signal working threads that are still alive (and waiting on queue)
     pthread_cond_broadcast(queue_cond_ptr);
     pthread_mutex_unlock(queue_mutex_ptr);
@@ -138,7 +139,6 @@ void tpool_destroy(tpool* tpool_ptr) {
     // free datastructures
     pthread_mutex_destroy(queue_mutex_ptr);
     pthread_cond_destroy(queue_cond_ptr);
-
     pthread_mutex_destroy(&(tpool_ptr->thread_count_mutex));
     pthread_cond_destroy(&(tpool_ptr->all_threads_idle_cond));
     free(tpool_ptr);
@@ -157,8 +157,7 @@ static job* create_job(tfunc fun_ptr, void* arg_ptr) {
     return new_job;
 }
 
-static void init_jobqueue(jobqueue* jobqueue_ptr, size_t size) {
-    jobqueue_ptr = (jobqueue*) malloc(sizeof(jobqueue));
+static void init_jobqueue(jobqueue* jobqueue_ptr) {
     if (jobqueue_ptr == NULL) {
         return;
     }
@@ -166,7 +165,7 @@ static void init_jobqueue(jobqueue* jobqueue_ptr, size_t size) {
     jobqueue_ptr->last = NULL;
     pthread_mutex_init(&(jobqueue_ptr->access_mutex), NULL);
     pthread_cond_init(&(jobqueue_ptr->non_empty_cond), NULL);
-    jobqueue_ptr->size = size;
+    jobqueue_ptr->size = 0;
 }
 
 /*
@@ -215,8 +214,10 @@ static void worker_function(tpool* tpool_ptr) {
         // --- jobqueue LOCKED
         pthread_mutex_lock(jobqueue_access_mutex_ptr);
         // continue conditionally on another job being available
-        while (jobqueue_ptr->first == NULL) {
+        while (jobqueue_ptr->first == NULL && !tpool_ptr->stopping) {
+            printf("worker: wait on empty queue\n");
             pthread_cond_wait(&(jobqueue_ptr->non_empty_cond), &(jobqueue_ptr->access_mutex));
+            printf("worker: wake up on non-empty queue\n");
         }
         // if thread pool is instructed to be destroyed, do not process next job, but exit
         if (tpool_ptr->stopping) {
@@ -249,12 +250,14 @@ static void worker_function(tpool* tpool_ptr) {
         // if thread pool not instructed to stop, no threads are busy and work list is empty
         // ----> signal on all threads idle condition
         if (!(tpool_ptr->stopping) && tpool_ptr->num_busy_threads == 0 && jobqueue_ptr->first == NULL) {
-            pthread_cond_signal(&(jobqueue_ptr->non_empty_cond));
+            pthread_cond_signal(&(tpool_ptr->all_threads_idle_cond));
         }
         pthread_mutex_unlock(thread_count_mutex_ptr);
         // --- busy counter UNLOCKED
     }
-    // release mutex
+    printf("worker exiting\n");
+    // wake up workers blocked on queue & release mutex
+    pthread_cond_broadcast(&jobqueue_ptr->non_empty_cond);
     pthread_mutex_unlock(jobqueue_access_mutex_ptr);
     // decrement thread counter and signal all thread idle if count is zero
     pthread_mutex_lock(thread_count_mutex_ptr);
