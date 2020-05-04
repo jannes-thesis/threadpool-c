@@ -9,8 +9,8 @@
 
 #include "dyn_tpool.h"
 
-static const size_t num_threads = 4;
-static const size_t num_items = 100;
+static const size_t num_threads = 2;
+static const size_t num_items = 10;
 
 void worker(void* arg) {
     FILE* fp;
@@ -43,20 +43,27 @@ int main(int argc, char** argv) {
     tm = tpool_create(num_threads);
     vals = calloc(num_items, sizeof(*vals));
 
+    printf("wait for all jobs to finish\n");
+    tpool_wait(tm);
+    printf("all jobs finished\n");
+
+    printf("submitting jobs again\n");
     for (i = 0; i < num_items; i++) {
         vals[i] = i;
         tpool_submit_job(tm, worker, vals + i);
     }
-
     printf("wait for all jobs to finish\n");
     tpool_wait(tm);
+    printf("all jobs finished\n");
 
-    for (i = 0; i < num_items; i++) {
-        printf("%d\n", vals[i]);
-    }
+//    for (i = 0; i < num_items; i++) {
+//        printf("%d\n", vals[i]);
+//    }
 
-    free(vals);
+//    free(vals);
+    printf("destroying pool\n");
     tpool_destroy(tm);
+    printf("destroyed\n");
 //    int val = 1;
 //    worker(&val);
     return 0;

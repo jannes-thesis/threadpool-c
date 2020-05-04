@@ -32,9 +32,9 @@ typedef struct tpool {
     jobqueue jobqueue;
     volatile size_t num_threads;
     volatile size_t num_busy_threads;
-    pthread_mutex_t thread_count_mutex;
-    pthread_cond_t all_threads_idle_cond;
-    bool stopping;      // this indicates a call to tpool_destroy has been issued
+    pthread_mutex_t thread_count_mutex; // lock for alive and busy counters
+    pthread_cond_t all_threads_idle_cond; // used to signal all workers are currently idle
+    bool stopping; // this indicates a call to tpool_destroy has been issued
     bool manager_exited;
 } tpool;
 
@@ -164,6 +164,7 @@ void tpool_wait(tpool* tpool_ptr) {
     pthread_mutex_lock(tpool_busy_mutex_ptr);
     // while there are still busy threads and the jobqueue is not empty conditionally wait
     while (tpool_ptr->num_busy_threads != 0 || tpool_ptr->jobqueue.size != 0) {
+        printf("some threads still busy or jobqueue non-empty -> wait on cond var\n");
         pthread_cond_wait(tpool_idle_cond_ptr, tpool_busy_mutex_ptr);
     }
     pthread_mutex_unlock(tpool_busy_mutex_ptr);
@@ -176,8 +177,7 @@ void tpool_destroy(tpool* tpool_ptr) {
     pthread_mutex_t* queue_mutex_ptr = &(queue.access_mutex);
     pthread_cond_t* queue_cond_ptr = &(queue.non_empty_cond);
 
-    tpool_ptr->stopping = true;
-
+    printf("clearing work queue\n");
     // lock work queue and clear it
     pthread_mutex_lock(queue_mutex_ptr);
     job* to_free = queue.first;
@@ -186,22 +186,41 @@ void tpool_destroy(tpool* tpool_ptr) {
         free(to_free);
         to_free = new_to_free;
     }
-    // signal working threads that are still alive (and waiting on queue)
+    queue.first = NULL;
+    queue.last = NULL;
+    queue.size = 0;
+
+    // inform workers to stop and signal all currently blocked ones
+    tpool_ptr->stopping = true;
     pthread_cond_broadcast(queue_cond_ptr);
     pthread_mutex_unlock(queue_mutex_ptr);
 
-    // wait for all threads to be idle (in this case all must have exited)
-    tpool_wait(tpool_ptr);
-    // wait for manager to exit
-    while (!tpool_ptr->manager_exited) {}
+    // wait for manager and workers to have exited
+    printf("waiting for all workers and manager to exit\n");
+    while (tpool_ptr->num_threads > 0 || !tpool_ptr->manager_exited) {
+        printf("signalling workers waiting on queue\n");
+//        // signal working threads that are still alive (and waiting on queue)
+//        pthread_mutex_lock(queue_mutex_ptr);
+//        pthread_cond_signal(queue_cond_ptr);
+//        pthread_mutex_unlock(queue_mutex_ptr);
+        sleep(10);
+    }
 
     // free datastructures
+    printf("free resources\n");
     pthread_mutex_destroy(queue_mutex_ptr);
+    printf("free resources\n");
     pthread_cond_destroy(queue_cond_ptr);
+    printf("free resources\n");
+    free(&queue);
 
+    printf("free resources\n");
     pthread_mutex_destroy(&(tpool_ptr->thread_count_mutex));
+    printf("free resources\n");
     pthread_cond_destroy(&(tpool_ptr->all_threads_idle_cond));
+    printf("free resources\n");
     free(tpool_ptr);
+    printf("destroy done\n");
 }
 
 /* =================== Internal ===================== */
@@ -245,6 +264,7 @@ static job* pop_next_job(jobqueue* jobqueue_ptr) {
     }
     // update size
     jobqueue_ptr->size -= 1;
+    printf("popped job, new size: %zu\n", jobqueue_ptr->size);
     return head;
 }
 
@@ -279,13 +299,16 @@ static void worker_function(worker_args* args) {
         // --- jobqueue LOCKED
         pthread_mutex_lock(jobqueue_access_mutex_ptr);
         // continue conditionally on another job being available
-        while (jobqueue_ptr->first == NULL) {
-            pthread_cond_wait(&(jobqueue_ptr->non_empty_cond), &(jobqueue_ptr->access_mutex));
+        while (jobqueue_ptr->first == NULL && !tpool_ptr->stopping) {
+            printf("worker %d waiting for next available job\n", *args->tid_ptr);
+            pthread_cond_wait(&jobqueue_ptr->non_empty_cond, jobqueue_access_mutex_ptr);
+            printf("worker %d woken for next available job\n", *args->tid_ptr);
         }
         // if thread pool is instructed to be destroyed, do not process next job, but exit
         if (tpool_ptr->stopping) {
             break;
         }
+        printf("worker %d attempting to get next available job\n", *args->tid_ptr);
         // get next job
         job_todo_ptr = pop_next_job(jobqueue_ptr);
         pthread_mutex_unlock(jobqueue_access_mutex_ptr);
@@ -295,6 +318,7 @@ static void worker_function(worker_args* args) {
         // --- busy counter LOCKED
         pthread_mutex_lock(thread_count_mutex_ptr);
         tpool_ptr->num_busy_threads += 1;
+        printf("busy threads: %zu\n", tpool_ptr->num_busy_threads);
         pthread_mutex_unlock(thread_count_mutex_ptr);
         // --- busy counter UNLOCKED
 
@@ -310,16 +334,21 @@ static void worker_function(worker_args* args) {
         // --- busy counter LOCKED
         pthread_mutex_lock(thread_count_mutex_ptr);
         tpool_ptr->num_busy_threads -= 1;
+        printf("busy threads: %zu\n", tpool_ptr->num_busy_threads);
         // if thread pool not instructed to stop, no threads are busy and work list is empty
         // ----> signal on all threads idle condition
         if (!(tpool_ptr->stopping) && tpool_ptr->num_busy_threads == 0 && jobqueue_ptr->first == NULL) {
-            pthread_cond_signal(&(jobqueue_ptr->non_empty_cond));
+            printf("worker %d signalling all workers idle and jobqueue empty\n", *args->tid_ptr);
+            pthread_cond_signal(&(tpool_ptr->all_threads_idle_cond));
         }
         pthread_mutex_unlock(thread_count_mutex_ptr);
         // --- busy counter UNLOCKED
     }
+    printf("worker %d shutting down\n", *args->tid_ptr);
     // release mutex
     pthread_mutex_unlock(jobqueue_access_mutex_ptr);
+    // signal other workers still waiting on queue
+    pthread_cond_broadcast(&jobqueue_ptr->non_empty_cond);
     // decrement thread counter and signal all thread idle if count is zero
     pthread_mutex_lock(thread_count_mutex_ptr);
     tpool_ptr->num_threads--;
@@ -337,22 +366,23 @@ static void manager_function(manager_args* args) {
     unsigned long long read_bytes = 0;
     unsigned long long write_bytes = 0;
     while (!tpool_ptr->stopping) {
-        worker* current = workers->first;
-        while (current != NULL) {
-            // get pid from current
-            pid_t tid = current->tid;
-            io_stats* stats = get_task_io_stats(tid);
-            read_bytes += stats->read_bytes;
-            write_bytes += stats->write_bytes;
-            current = current->next;
-        }
+//        worker* current = workers->first;
+//        while (current != NULL) {
+//            // get pid from current
+//            pid_t tid = current->tid;
+//            io_stats* stats = get_task_io_stats(tid);
+//            read_bytes += stats->read_bytes;
+//            write_bytes += stats->write_bytes;
+//            current = current->next;
+//        }
         printf("kb read: %llu, kb written: %llu\n", read_bytes, write_bytes);
         read_bytes = write_bytes = 0;
         sleep(1);
     }
+    printf("manager exiting\n");
     tpool_ptr->manager_exited = true;
-    free(args);
-    free(workers);
+//    free(args);
+//    free(workers);
     // should also free worker structs
 }
 
