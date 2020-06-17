@@ -13,7 +13,7 @@
 static const size_t num_threads = 2;
 static const size_t num_items = 100;
 
-void worker(void *arg) {
+void user_f(void *arg) {
     int *val = arg;
     int old = *val;
 
@@ -39,6 +39,7 @@ int test() {
     s->atomic = 1;
     printf("atomic: %d, non: %d\n", s->atomic, s->non_atomic);
     printf("atomic: %d, non: %d\n", atomic_load(&s->atomic), s->non_atomic);
+    return 0;
 }
 
 int tpool_test() {
@@ -51,10 +52,11 @@ int tpool_test() {
 
     for (i = 0; i < num_items; i++) {
         vals[i] = i;
-        tpool_submit_job(tm, worker, vals + i);
+        tpool_submit_job(tm, user_f, vals + i);
     }
 
-    tpool_scale(tm, -1);
+//    tpool_scale(tm, -1);
+    set_scale_val(tm, 2);
     tpool_wait(tm);
 
     for (i = 0; i < num_items; i++) {

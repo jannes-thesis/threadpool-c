@@ -30,3 +30,5 @@ void tpool_wait(threadpool tpool);
 // scale amount of workers by diff
 bool tpool_scale(threadpool tpool, int diff);
 
+void set_scale_val(threadpool tpool, int val);
+

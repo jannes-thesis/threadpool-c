@@ -80,6 +80,7 @@ static job* pop_next_job(jobqueue* jq);
 static void push_new_job(jobqueue* jq, job* new_job);
 static job* create_user_job(tfunc ufunc, void* uarg);
 static job* create_scale_job(scaling_command sc);
+static void check_scaling(tpool* tp);
 static void push_scale_job(jobqueue* jq, scaling_command sc);
 static void worker_function(worker_args* args);
 static void add_extra_worker(tpool* tpool_ptr);
@@ -87,6 +88,10 @@ static void remove_worker(size_t worker_id, tpool* tpool_ptr);
 
 
 /* ====================== API ====================== */
+
+void set_scale_val(tpool* tp, int val) {
+    tp->to_scale = val;
+}
 
 tpool* tpool_create(size_t size) {
     tpool* tpool_ptr;
@@ -311,16 +316,11 @@ static void push_scale_job(jobqueue* jq, scaling_command sc) {
  * @param tpool_ptr
  * @return true if worker should exit
  */
-static bool worker_attempt_scaling(pid_t worker_id, tpool* tpool_ptr) {
-    // read scale value
-    // if negative atomic increase
-    // if positive atomic decrease
-    // else return
-
-    // in case atomic op fails because scale value has changed in meantime return
-    // otherwise modify value and call respective add/remove worker function
-    // if worker removed return true else false
-    return false;
+static void check_scaling(tpool* tpool_ptr) {
+    int diff = tpool_ptr->to_scale;
+    if (atomic_compare_exchange_weak(&tpool_ptr->to_scale, &diff, 0)) {
+        tpool_scale(tpool_ptr, diff);
+    }
 }
 
 static void worker_function(worker_args* args) {
@@ -330,17 +330,16 @@ static void worker_function(worker_args* args) {
     job* job_todo;
     int lock_available = -1;
     while (!tpool_ptr->stopping) {
-
+        check_scaling(tpool_ptr);
         while (jobqueue_ptr->size == 0) {
             sleep(1);
             if (tpool_ptr->stopping)
                 break;
         }
+        /* LOCK jobqueue */
         while (!atomic_compare_exchange_weak(&(jobqueue_ptr->lock), &lock_available, args->wid)) {
             lock_available = -1;
         }
-        // --- jobqueue LOCKED
-
         // if thread pool is instructed to be destroyed, do not process next job, but exit
         if (tpool_ptr->stopping) {
             jobqueue_ptr->lock = -1;
@@ -351,7 +350,7 @@ static void worker_function(worker_args* args) {
         printf("worker %zu popping job\n", args->wid);
         job_todo = pop_next_job(jobqueue_ptr);
         jobqueue_ptr->lock = -1;
-        // --- jobqueue UNLOCKED
+        /* UNLOCKED jobqueue */
 
         // check if really obtained job (queue could have been empty)
         if (job_todo != NULL && job_todo->is_uf) {

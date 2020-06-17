@@ -4,7 +4,6 @@ set(CMAKE_C_STANDARD 11)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-add_subdirectory(static_spinlock)
-add_subdirectory(static_mutex)
-add_subdirectory(dynamic_proc)
-add_subdirectory(dynamic_demand)
+add_executable(static_mutex_pool simple_tpool.h simple_tpool.c test.c)
+
+target_link_libraries(static_mutex_pool Threads::Threads)
