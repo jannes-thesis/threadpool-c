@@ -5,7 +5,8 @@
 #include <stdbool.h>
 #include <stdatomic.h>
 #include <unistd.h>
-#include "spinlock_tpool.h"
+#include "adaptive_tpool.h"
+#include "scaling.h"
 
 /* ================== data structures ==================== */
 
@@ -63,9 +64,8 @@ typedef struct tpool {
     volatile size_t num_busy_threads;
     /** true once destroy call has been issued */
     bool stopping;
-    /** the amount of threads to scale up (positive) or down (negative) */
-    _Atomic(int) to_scale;
     worker_list workers;
+    traceset_adaptor* adaptor;
 } tpool;
 
 typedef struct worker_args {
@@ -80,7 +80,7 @@ static job* pop_next_job(jobqueue* jq);
 static void push_new_job(jobqueue* jq, job* new_job);
 static job* create_user_job(tfunc ufunc, void* uarg);
 static job* create_scale_job(scaling_command sc);
-static void check_scaling(tpool* tp);
+static void check_scaling(tpool* tp, size_t wid);
 static void push_scale_job(jobqueue* jq, scaling_command sc);
 static void worker_function(worker_args* args);
 static void add_extra_worker(tpool* tpool_ptr);
@@ -89,11 +89,8 @@ static void remove_worker(size_t worker_id, tpool* tpool_ptr);
 
 /* ====================== API ====================== */
 
-void set_scale_val(tpool* tp, int val) {
-    tp->to_scale = val;
-}
-
-tpool* tpool_create(size_t size) {
+// TODO init adaptor
+tpool* tpool_create(size_t size, adaptor_parameters* adaptor_params) {
     tpool* tpool_ptr;
     // initialize thread pool structure
     tpool_ptr = malloc(sizeof(tpool));
@@ -109,7 +106,9 @@ tpool* tpool_create(size_t size) {
     tpool_ptr->num_threads = size;
     tpool_ptr->stopping = false;
     tpool_ptr->count_lock = -1;
-    tpool_ptr->to_scale = 0;
+    tpool_ptr->adaptor = malloc(sizeof(traceset_adaptor));
+    tpool_ptr->adaptor->params = *adaptor_params;
+    tpool_ptr->adaptor->lock = -1;
 
     // create worker threads
     printf("creating workers\n");
@@ -316,10 +315,12 @@ static void push_scale_job(jobqueue* jq, scaling_command sc) {
  * @param tpool_ptr
  * @return true if worker should exit
  */
-static void check_scaling(tpool* tpool_ptr) {
-    int diff = tpool_ptr->to_scale;
-    if (atomic_compare_exchange_weak(&tpool_ptr->to_scale, &diff, 0)) {
-        tpool_scale(tpool_ptr, diff);
+static void check_scaling(tpool* tpool_ptr, size_t wid) {
+    if (ready_for_update(tpool_ptr->adaptor) && lock_adaptor(tpool_ptr->adaptor, wid)) {
+        int to_scale = get_scale_advice(tpool_ptr->adaptor);
+        unlock_adaptor(tpool_ptr->adaptor);
+        if (to_scale != 0)
+            tpool_scale(tpool_ptr, to_scale);
     }
 }
 
@@ -330,7 +331,7 @@ static void worker_function(worker_args* args) {
     job* job_todo;
     int lock_available = -1;
     while (!tpool_ptr->stopping) {
-        check_scaling(tpool_ptr);
+        check_scaling(tpool_ptr, args->wid);
         while (jobqueue_ptr->size == 0) {
             sleep(1);
             if (tpool_ptr->stopping)
