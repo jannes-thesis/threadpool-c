@@ -5,8 +5,6 @@
 #ifndef SYSCALL_TESTS_TRACESET_H
 #define SYSCALL_TESTS_TRACESET_H
 
-#endif //SYSCALL_TESTS_TRACESET_H
-
 #include <linux/types.h>
 #include <sys/types.h>
 
@@ -42,3 +40,6 @@ int register_traceset_targets(int traceset_id, pid_t* target_pids, int amount_ta
 int deregister_traceset_targets(int traceset_id, pid_t* target_pids, int amount_targets);
 bool register_traceset_target(int traceset_id, pid_t target_pid);
 bool deregister_traceset_target(int traceset_id, pid_t target_pid);
+
+#endif
+

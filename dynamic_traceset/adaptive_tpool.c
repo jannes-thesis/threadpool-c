@@ -6,7 +6,7 @@
 #include <stdatomic.h>
 #include <unistd.h>
 #include "adaptive_tpool.h"
-#include "scaling.h"
+#include "debug_macro.h"
 
 /* ================== data structures ==================== */
 
@@ -89,8 +89,13 @@ static void remove_worker(size_t worker_id, tpool* tpool_ptr);
 
 /* ====================== API ====================== */
 
-// TODO init adaptor
 tpool* tpool_create(size_t size, adaptor_parameters* adaptor_params) {
+    traceset_adaptor* adaptor = malloc(sizeof(traceset_adaptor));
+    // TODO: initialization of adaptor
+    return tpool_create_2(size, adaptor);
+}
+
+tpool* tpool_create_2(size_t size, traceset_adaptor* adaptor) {
     tpool* tpool_ptr;
     // initialize thread pool structure
     tpool_ptr = malloc(sizeof(tpool));
@@ -102,16 +107,14 @@ tpool* tpool_create(size_t size, adaptor_parameters* adaptor_params) {
         free(tpool_ptr);
         return NULL;
     }
-    printf("queue initialized: %d\n", tpool_ptr->jobqueue.lock);
+    debug_print("queue initialized: %d\n", tpool_ptr->jobqueue.lock);
     tpool_ptr->num_threads = size;
     tpool_ptr->stopping = false;
     tpool_ptr->count_lock = -1;
-    tpool_ptr->adaptor = malloc(sizeof(traceset_adaptor));
-    tpool_ptr->adaptor->params = *adaptor_params;
-    tpool_ptr->adaptor->lock = -1;
+    tpool_ptr->adaptor = adaptor;
 
     // create worker threads
-    printf("creating workers\n");
+    debug_print("%s", "creating workers\n");
     tpool_ptr->workers.amount = size;
     tpool_ptr->workers.max_id = size - 1;
     tpool_ptr->workers.lock = -1;
@@ -119,7 +122,7 @@ tpool* tpool_create(size_t size, adaptor_parameters* adaptor_params) {
 
     for (int i = 0; i < size; ++i) {
         pthread_t thread;
-        printf("creating worker %d\n", i);
+        debug_print("creating worker %d\n", i);
         worker* next = malloc(sizeof(worker));
         next->wid = i;
 
@@ -127,7 +130,7 @@ tpool* tpool_create(size_t size, adaptor_parameters* adaptor_params) {
         worker_args_ptr->tp = tpool_ptr;
         worker_args_ptr->wid = next->wid;
 
-        printf("creating worker %d's pthread\n", i);
+        debug_print("creating worker %d's pthread\n", i);
         pthread_create(&thread, NULL, (void* (*)(void*)) worker_function, (void*) worker_args_ptr);
         pthread_detach(thread);
         next->thread = thread;
@@ -258,7 +261,7 @@ static void init_jobqueue(jobqueue* jobqueue_ptr) {
     jobqueue_ptr->first = NULL;
     jobqueue_ptr->last = NULL;
     jobqueue_ptr->lock = -1;
-    printf("%d\n", jobqueue_ptr->lock);
+    debug_print("%d\n", jobqueue_ptr->lock);
     jobqueue_ptr->size = 0;
 }
 
@@ -266,7 +269,7 @@ static void init_jobqueue(jobqueue* jobqueue_ptr) {
  * pops the head of the jobqueue
  */
 static job* pop_next_job(jobqueue* jq) {
-    printf("pop\n");
+    debug_print("%s", "pop\n");
     job* head = jq->first;
     if (head == NULL) {
         return NULL;
@@ -286,7 +289,7 @@ static job* pop_next_job(jobqueue* jq) {
  * pushes new job to the end of the jobqueue
  */
 static void push_new_job(jobqueue* jq, job* new_job) {
-    printf("push\n");
+    debug_print("%s", "push\n");
     new_job->next = NULL;
     // if queue is empty new job becomes head and last
     if (jq->size == 0) {
@@ -326,7 +329,7 @@ static void check_scaling(tpool* tpool_ptr, size_t wid) {
 
 static void worker_function(worker_args* args) {
     tpool* tpool_ptr = args->tp;
-    printf("worker %zu starting\n", args->wid);
+    debug_print("worker %zu starting\n", args->wid);
     jobqueue* jobqueue_ptr = &(tpool_ptr->jobqueue);
     job* job_todo;
     int lock_available = -1;
@@ -347,8 +350,8 @@ static void worker_function(worker_args* args) {
             break;
         }
         // get next job
-        printf("queue size: %zu\n", jobqueue_ptr->size);
-        printf("worker %zu popping job\n", args->wid);
+        debug_print("queue size: %zu\n", jobqueue_ptr->size);
+        debug_print("worker %zu popping job\n", args->wid);
         job_todo = pop_next_job(jobqueue_ptr);
         jobqueue_ptr->lock = -1;
         /* UNLOCKED jobqueue */
@@ -362,7 +365,7 @@ static void worker_function(worker_args* args) {
             tpool_ptr->num_busy_threads += 1;
             tpool_ptr->count_lock = -1;
             // --- busy counter UNLOCKED
-            printf("worker %zu executing job\n", args->wid);
+            debug_print("worker %zu executing job\n", args->wid);
             // execute job
             job_todo->wi.uf.f(job_todo->wi.uf.arg);
             // free
@@ -378,7 +381,7 @@ static void worker_function(worker_args* args) {
         }
         else if (job_todo != NULL) {
             if (job_todo->wi.sc == Clone) {
-                printf("worker %zu performing clone\n", args->wid);
+                debug_print("worker %zu performing clone\n", args->wid);
                 while (!atomic_compare_exchange_weak(&(tpool_ptr->workers.lock), &lock_available, args->wid)) {
                     lock_available = -1;
                 }
@@ -386,7 +389,7 @@ static void worker_function(worker_args* args) {
                 tpool_ptr->workers.lock = -1;
             }
             else if (job_todo->wi.sc == Terminate) {
-                printf("worker %zu performing terminate\n", args->wid);
+                debug_print("worker %zu performing terminate\n", args->wid);
                 break;
             }
         }
@@ -445,12 +448,12 @@ static void add_extra_worker(tpool *tpool_ptr) {
     new_worker->wid = tpool_ptr->workers.max_id + 1;
     new_worker->next = NULL;
 
-    printf("creating worker %zu\n", new_worker->wid);
+    debug_print("creating worker %zu\n", new_worker->wid);
     worker_args* worker_args_ptr = malloc(sizeof(worker_args));
     worker_args_ptr->tp = tpool_ptr;
     worker_args_ptr->wid = new_worker->wid;
 
-    printf("creating worker %zu's pthread\n", new_worker->wid);
+    debug_print("creating worker %zu's pthread\n", new_worker->wid);
     pthread_create(&thread, NULL, (void* (*)(void*)) worker_function, (void*) worker_args_ptr);
     pthread_detach(thread);
     new_worker->thread = thread;

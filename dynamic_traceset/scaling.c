@@ -18,6 +18,29 @@ static long current_time_ms() {
     return ms;
 }
 
+static void metric_buf_insert_entry(metric_buffer* buffer, float value, int amount_targets, unsigned long time) {
+    int new_entry_index = (buffer->index_newest + 1) % METRIC_BUFFER_SIZE ;
+    buffer->ring[new_entry_index].metric = value;
+    buffer->ring[new_entry_index].amount_targets = amount_targets;
+    buffer->ring[new_entry_index].time = time;
+    if (buffer->size < METRIC_BUFFER_SIZE)
+        buffer->size++;
+}
+
+static scale_metric_datapoint* metric_buf_get_entry(metric_buffer* buffer, int offset) {
+    return &buffer->ring[(buffer->index_newest + offset) % METRIC_BUFFER_SIZE];
+}
+
+/**
+ * @param buffer: metric_buffer*
+ * @param cursor: scale_metric_datapoint*
+ * @param i: int*
+ */
+#define metric_buf_for_each_new_to_old(buffer, cursor, i) \
+    for (*i = buffer->index_newest, cursor = buffer->ring[*i]; \
+         *i != (*i + 1 + (METRIC_BUFFER_SIZE - buffer->size)) % METRIC_BUFFER_SIZE; \
+         *i = (*i - 1) % METRIC_BUFFER_SIZE, cursor = buffer->ring[*i])  \
+
 static void copy_traceset(traceset* from, traceset* to) {
     to->data->amount_targets = from->data->amount_targets;
     to->data->write_bytes = from->data->write_bytes;
@@ -67,7 +90,37 @@ static bool take_snapshot(traceset_adaptor* adaptor) {
 }
 
 static int determine_scale_advice(traceset_adaptor* adaptor) {
+    // if current interval scale metric is worse than one before:
+    //      adjust back to previous size OR if not utilized
+    scale_metric_datapoint* current_interval_metric;
+    scale_metric_datapoint* previous_interval_metric;
+    if (adaptor->data.scale_metric_history->size > 1) {
+        current_interval_metric = metric_buf_get_entry(adaptor->data.scale_metric_history, 0);
+        previous_interval_metric = metric_buf_get_entry(adaptor->data.scale_metric_history, 1);
+        if (previous_interval_metric->metric > current_interval_metric->metric) {
+            return previous_interval_metric->amount_targets - current_interval_metric->amount_targets;
+        }
+        else {
+            return current_interval_metric->amount_targets;
+        }
+    }
+}
 
+traceset_adaptor* create_adaptor(adaptor_parameters* params) {
+    traceset_adaptor* adaptor = malloc(sizeof(traceset_adaptor));
+    if (adaptor == NULL) {
+        return NULL;
+    }
+    adaptor->lock = -1;
+    adaptor->params = *params;
+    adaptor->data.last_snapshot_ms = 0;
+    adaptor->data.live_traceset = register_traceset(NULL, 0,
+            params->traced_syscalls, params->amount_traced_syscalls);
+    adaptor->data.snapshot_traceset = malloc(sizeof(traceset));
+    adaptor->data.snapshot_traceset->data = malloc(sizeof(traceset_data));
+    adaptor->data.snapshot_traceset->sdata_arr = malloc(sizeof(traceset_syscall_data) * params->amount_traced_syscalls);
+    //TODO error handling
+    return adaptor;
 }
 
 bool ready_for_update(traceset_adaptor* adaptor) {
@@ -93,3 +146,10 @@ int get_scale_advice(traceset_adaptor* adaptor) {
     return 0;
 }
 
+void add_tracee(pid_t worker_id) {
+
+}
+
+void remove_tracee(pid_t worker_id) {
+
+}
