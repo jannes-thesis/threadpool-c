@@ -15,10 +15,17 @@ typedef struct tpool* threadpool;
 // function that can be submitted
 typedef void (*tfunc)(void* arg);
 
-// create pool with given size (amount of threads)
+/**
+ * @param size: initial size
+ * @param adaptor_params: parameters for traceset
+ * @return
+ */
 threadpool tpool_create(size_t size, adaptor_parameters* adaptor_params);
 
-// create pool with completely initialized adaptor
+/**
+ * @param size: initial size of pool
+ * @param adaptor: already initialized adaptor
+ */
 threadpool tpool_create_2(size_t size, traceset_adaptor* adaptor);
 
 // destroy pool, let all threads finish current work and then exit

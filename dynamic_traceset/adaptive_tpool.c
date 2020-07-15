@@ -329,7 +329,9 @@ static void check_scaling(tpool* tpool_ptr, size_t wid) {
 
 static void worker_function(worker_args* args) {
     tpool* tpool_ptr = args->tp;
-    debug_print("worker %zu starting\n", args->wid);
+    pid_t worker_pid = getpid();
+    debug_print("worker %zu starting (pid: %d)\n", args->wid, worker_pid);
+    add_tracee(tpool_ptr->adaptor, worker_pid);
     jobqueue* jobqueue_ptr = &(tpool_ptr->jobqueue);
     job* job_todo;
     int lock_available = -1;
@@ -406,6 +408,7 @@ static void worker_function(worker_args* args) {
     }
     tpool_ptr->num_threads--;
     tpool_ptr->count_lock = -1;
+    remove_tracee(tpool_ptr->adaptor, worker_pid);
 }
 
 /**

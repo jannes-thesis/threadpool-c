@@ -68,7 +68,7 @@ bool lock_adaptor(traceset_adaptor* adaptor, size_t worker_id);
 void unlock_adaptor(traceset_adaptor* adaptor);
 int get_scale_advice(traceset_adaptor* adaptor);
 
-void add_tracee(pid_t worker_id);
-void remove_tracee(pid_t worker_id);
+void add_tracee(traceset_adaptor* adaptor, pid_t worker_pid);
+void remove_tracee(traceset_adaptor* adaptor, pid_t worker_pid);
 
 #endif //THREADPOOL_SCALING_H

@@ -9,8 +9,9 @@
 #include <malloc.h>
 #include <time.h>
 #include <stdatomic.h>
+#include "debug_macro.h"
 
-static long current_time_ms() {
+static unsigned long current_time_ms() {
     struct timespec spec;
     clock_gettime(CLOCK_REALTIME, &spec);
 
@@ -77,8 +78,9 @@ static bool take_snapshot(traceset_adaptor* adaptor) {
         copy_traceset(adaptor->data.live_traceset, adaptor->data.snapshot_traceset);
         if (adaptor->data.snapshot_traceset->data->amount_targets == amount_targets_snapshot) {
             float scale_metric = adaptor->params.scaling_metric(&interval_data);
-            metric_buf_insert_entry(adaptor->data.scale_metric_history, scale_metric, amount_targets_snapshot,
+            metric_buf_insert_entry(&adaptor->data.scale_metric_history, scale_metric, amount_targets_snapshot,
                                     interval_data.end);
+            debug_print("%s\n", "took valid interval snapshot");
             return true;
         } else {
             return false;
@@ -94,9 +96,9 @@ static int determine_scale_advice(traceset_adaptor* adaptor) {
     //      adjust back to previous size OR if not utilized
     scale_metric_datapoint* current_interval_metric;
     scale_metric_datapoint* previous_interval_metric;
-    if (adaptor->data.scale_metric_history->size > 1) {
-        current_interval_metric = metric_buf_get_entry(adaptor->data.scale_metric_history, 0);
-        previous_interval_metric = metric_buf_get_entry(adaptor->data.scale_metric_history, 1);
+    if (adaptor->data.scale_metric_history.size > 1) {
+        current_interval_metric = metric_buf_get_entry(&adaptor->data.scale_metric_history, 0);
+        previous_interval_metric = metric_buf_get_entry(&adaptor->data.scale_metric_history, 1);
         if (previous_interval_metric->metric > current_interval_metric->metric) {
             return previous_interval_metric->amount_targets - current_interval_metric->amount_targets;
         }
@@ -146,10 +148,10 @@ int get_scale_advice(traceset_adaptor* adaptor) {
     return 0;
 }
 
-void add_tracee(pid_t worker_id) {
-
+void add_tracee(traceset_adaptor* adaptor, pid_t worker_pid) {
+    register_traceset_target(adaptor->data.live_traceset->data->traceset_id, worker_pid);
 }
 
-void remove_tracee(pid_t worker_id) {
-
+void remove_tracee(traceset_adaptor* adaptor, pid_t worker_pid) {
+    deregister_traceset_target(adaptor->data.live_traceset->data->traceset_id, worker_pid);
 }
