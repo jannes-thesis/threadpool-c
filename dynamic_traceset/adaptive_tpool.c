@@ -319,8 +319,11 @@ static void push_scale_job(jobqueue* jq, scaling_command sc) {
  * @return true if worker should exit
  */
 static void check_scaling(tpool* tpool_ptr, size_t wid) {
+    debug_print("worker %zu check for potential scaling\n", wid);
     if (ready_for_update(tpool_ptr->adaptor) && lock_adaptor(tpool_ptr->adaptor, wid)) {
+        debug_print("worker %zu get scaling advice\n", wid);
         int to_scale = get_scale_advice(tpool_ptr->adaptor);
+        debug_print("worker %zu got scaling advice: scale by %d\n", wid, to_scale);
         unlock_adaptor(tpool_ptr->adaptor);
         if (to_scale != 0)
             tpool_scale(tpool_ptr, to_scale);
@@ -332,6 +335,7 @@ static void worker_function(worker_args* args) {
     pid_t worker_pid = getpid();
     debug_print("worker %zu starting (pid: %d)\n", args->wid, worker_pid);
     add_tracee(tpool_ptr->adaptor, worker_pid);
+    debug_print("worker %zu added as tracee (pid: %d)\n", args->wid, worker_pid);
     jobqueue* jobqueue_ptr = &(tpool_ptr->jobqueue);
     job* job_todo;
     int lock_available = -1;

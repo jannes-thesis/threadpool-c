@@ -9,6 +9,7 @@
 #include <sys/types.h>
 #include <string.h>
 #include "traceset.h"
+#include "debug_macro.h"
 
 static traceset_syscall_data* get_syscall_datap(traceset_data* datap) {
     return (traceset_syscall_data*) (datap + 1);
@@ -24,12 +25,12 @@ traceset* register_traceset(pid_t* target_pids, int amount_targets, int* syscall
 
     int register_return = (int) syscall(436, -1, target_pids, amount_targets, syscall_nrs, amount_syscalls);
     if (register_return < 0) {
-//        printf("register traceset returned error: %d\n", register_return);
+        debug_print("register traceset returned error: %d\n", register_return);
         free(ts);
         return NULL;
     }
     else {
-//        printf("register traceset returned file descriptor: %d\n", register_return);
+        debug_print("register traceset returned file descriptor: %d\n", register_return);
         datap = mmap(0, sizeof(traceset_data), PROT_READ | PROT_WRITE,
                      MAP_SHARED, register_return, 0);
         if (datap == NULL) {

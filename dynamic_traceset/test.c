@@ -40,7 +40,7 @@ void user_f(void *arg) {
     int* valp = arg;
     debug_print("%s %d\n", "user function start", *valp);
     char filename[50];
-    sprintf(filename, "wout%d", *valp);
+    sprintf(filename, "wout%d.txt", *valp);
     FILE* fp = fopen(filename, "w");
     for (int i = 0; i < 1000; ++i) {
         fprintf(fp, "this is a line\n");
@@ -50,7 +50,12 @@ void user_f(void *arg) {
 
 int tpool_test() {
     debug_print("%s\n", "creating tpool");
-    threadpool tm = tpool_create_2(num_threads, get_adaptor());
+    traceset_adaptor* adaptor = get_adaptor();
+    if (adaptor == NULL) {
+        debug_print("%s\n", "could create traceset adaptor for tpool");
+        return -1;
+    }
+    threadpool tm = tpool_create_2(num_threads, adaptor);
     debug_print("%s\n", "start submitting jobs to tpool");
     for (int i = 0; i < num_items; i++) {
         tpool_submit_job(tm, user_f, &i);

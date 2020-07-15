@@ -71,6 +71,7 @@ static void diff_traceset(traceset* later, traceset* earlier, unsigned long earl
  */
 static bool take_snapshot(traceset_adaptor* adaptor) {
     traceset_interval interval_data;
+    debug_print("%s\n", "attempt interval snapshot");
     int amount_targets_snapshot = adaptor->data.snapshot_traceset->data->amount_targets;
     if (adaptor->data.live_traceset->data->amount_targets == amount_targets_snapshot) {
         diff_traceset(adaptor->data.live_traceset, adaptor->data.snapshot_traceset, adaptor->data.last_snapshot_ms,
@@ -83,9 +84,11 @@ static bool take_snapshot(traceset_adaptor* adaptor) {
             debug_print("%s\n", "took valid interval snapshot");
             return true;
         } else {
+            debug_print("%s\n", "taken snapshot invalid, amount of targets changed during snapshotting");
             return false;
         }
     } else {
+        debug_print("%s\n", "can't take valid snapshot, amount of targets changed");
         copy_traceset(adaptor->data.live_traceset, adaptor->data.snapshot_traceset);
         return false;
     }
@@ -118,11 +121,30 @@ traceset_adaptor* create_adaptor(adaptor_parameters* params) {
     adaptor->data.last_snapshot_ms = 0;
     adaptor->data.live_traceset = register_traceset(NULL, 0,
             params->traced_syscalls, params->amount_traced_syscalls);
+    if (adaptor->data.live_traceset == NULL) {
+        goto err;
+    }
     adaptor->data.snapshot_traceset = malloc(sizeof(traceset));
+    if (adaptor->data.snapshot_traceset == NULL) {
+        goto err;
+    }
     adaptor->data.snapshot_traceset->data = malloc(sizeof(traceset_data));
     adaptor->data.snapshot_traceset->sdata_arr = malloc(sizeof(traceset_syscall_data) * params->amount_traced_syscalls);
-    //TODO error handling
+    if (adaptor->data.snapshot_traceset->data == NULL || adaptor->data.snapshot_traceset->sdata_arr == NULL) {
+        goto err;
+    }
+    copy_traceset(adaptor->data.live_traceset, adaptor->data.snapshot_traceset);
     return adaptor;
+
+    err:
+    if (adaptor->data.snapshot_traceset != NULL) {
+        free(adaptor->data.snapshot_traceset->data);
+        free(adaptor->data.snapshot_traceset->sdata_arr);
+    }
+    free(adaptor->data.snapshot_traceset);
+    deregister_traceset(adaptor->data.live_traceset->data->traceset_id);
+    free(adaptor);
+    return NULL;
 }
 
 bool ready_for_update(traceset_adaptor* adaptor) {
