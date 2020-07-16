@@ -20,13 +20,13 @@ typedef void (*tfunc)(void* arg);
  * @param adaptor_params: parameters for traceset
  * @return
  */
-threadpool tpool_create(size_t size, adaptor_parameters* adaptor_params);
+threadpool tpool_create(size_t size, trace_adaptor_params* adaptor_params);
 
 /**
  * @param size: initial size of pool
  * @param adaptor: already initialized adaptor
  */
-threadpool tpool_create_2(size_t size, traceset_adaptor* adaptor);
+threadpool tpool_create_2(size_t size, trace_adaptor* adaptor);
 
 // destroy pool, let all threads finish current work and then exit
 void tpool_destroy(threadpool tpool);

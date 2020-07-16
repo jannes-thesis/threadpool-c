@@ -65,7 +65,7 @@ typedef struct tpool {
     /** true once destroy call has been issued */
     bool stopping;
     worker_list workers;
-    traceset_adaptor* adaptor;
+    trace_adaptor* adaptor;
 } tpool;
 
 typedef struct worker_args {
@@ -89,13 +89,13 @@ static void remove_worker(size_t worker_id, tpool* tpool_ptr);
 
 /* ====================== API ====================== */
 
-tpool* tpool_create(size_t size, adaptor_parameters* adaptor_params) {
-    traceset_adaptor* adaptor = malloc(sizeof(traceset_adaptor));
+tpool* tpool_create(size_t size, trace_adaptor_params* adaptor_params) {
+    trace_adaptor* adaptor = malloc(sizeof(trace_adaptor));
     // TODO: initialization of adaptor
     return tpool_create_2(size, adaptor);
 }
 
-tpool* tpool_create_2(size_t size, traceset_adaptor* adaptor) {
+tpool* tpool_create_2(size_t size, trace_adaptor* adaptor) {
     tpool* tpool_ptr;
     // initialize thread pool structure
     tpool_ptr = malloc(sizeof(tpool));
@@ -320,11 +320,11 @@ static void push_scale_job(jobqueue* jq, scaling_command sc) {
  */
 static void check_scaling(tpool* tpool_ptr, size_t wid) {
     debug_print("worker %zu check for potential scaling\n", wid);
-    if (ready_for_update(tpool_ptr->adaptor) && lock_adaptor(tpool_ptr->adaptor, wid)) {
+    if (ta_ready_for_update(tpool_ptr->adaptor) && ta_lock(tpool_ptr->adaptor, wid)) {
         debug_print("worker %zu get scaling advice\n", wid);
-        int to_scale = get_scale_advice(tpool_ptr->adaptor);
+        int to_scale = ta_get_scale_advice(tpool_ptr->adaptor);
         debug_print("worker %zu got scaling advice: scale by %d\n", wid, to_scale);
-        unlock_adaptor(tpool_ptr->adaptor);
+        ta_unlock(tpool_ptr->adaptor);
         if (to_scale != 0)
             tpool_scale(tpool_ptr, to_scale);
     }
@@ -334,7 +334,7 @@ static void worker_function(worker_args* args) {
     tpool* tpool_ptr = args->tp;
     pid_t worker_pid = getpid();
     debug_print("worker %zu starting (pid: %d)\n", args->wid, worker_pid);
-    add_tracee(tpool_ptr->adaptor, worker_pid);
+    ta_add_tracee(tpool_ptr->adaptor, worker_pid);
     debug_print("worker %zu added as tracee (pid: %d)\n", args->wid, worker_pid);
     jobqueue* jobqueue_ptr = &(tpool_ptr->jobqueue);
     job* job_todo;
@@ -412,7 +412,7 @@ static void worker_function(worker_args* args) {
     }
     tpool_ptr->num_threads--;
     tpool_ptr->count_lock = -1;
-    remove_tracee(tpool_ptr->adaptor, worker_pid);
+    ta_remove_tracee(tpool_ptr->adaptor, worker_pid);
 }
 
 /**

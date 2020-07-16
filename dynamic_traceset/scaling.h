@@ -30,45 +30,46 @@ typedef struct traceset_interval {
     traceset interval_data;
 } traceset_interval;
 
-typedef struct adaptor_parameters {
+typedef struct trace_adaptor_params {
     unsigned long interval_ms;
     unsigned int amount_traced_syscalls;
     int* traced_syscalls;
     float (*scaling_metric) (traceset_interval* interval_data);
-} adaptor_parameters;
+} trace_adaptor_params;
 
-typedef struct adaptor_data {
+typedef struct trace_adaptor_data {
     traceset* live_traceset;
     traceset* snapshot_traceset;
     unsigned long last_snapshot_ms;
     metric_buffer scale_metric_history;
-} adaptor_data;
+} trace_adaptor_data;
 
-typedef struct traceset_adaptor {
-    adaptor_parameters params;
-    adaptor_data data;
+typedef struct trace_adaptor {
+    trace_adaptor_params params;
+    trace_adaptor_data data;
     _Atomic(int) lock; // -1 is unlocked, lock with worker id
-} traceset_adaptor;
+} trace_adaptor;
 
-traceset_adaptor* create_adaptor(adaptor_parameters* params);
+trace_adaptor* ta_create(trace_adaptor_params* params);
+void ta_destroy(trace_adaptor* adaptor);
+
+bool ta_ready_for_update(trace_adaptor* adaptor);
+bool ta_lock(trace_adaptor* adaptor, size_t worker_id);
+void ta_unlock(trace_adaptor* adaptor);
+int ta_get_scale_advice(trace_adaptor* adaptor);
+
+void ta_add_tracee(trace_adaptor* adaptor, pid_t worker_pid);
+void ta_remove_tracee(trace_adaptor* adaptor, pid_t worker_pid);
 
 /**
  * API usage by workers:
  * 1. pool workers check if adaptor is ready for update
- * (both the interval has passed and no update is currently peforming)
+ * (both the interval has passed and no update is currently performing)
  * if ready, continue, otherwise skip update
  * 2. try to lock adaptor, if successful continue
  * 3. get scale advice (also does data update), otherwise stop
  * 4. unlock adaptor
  * 5. push appropriate scale commands
  */
-
-bool ready_for_update(traceset_adaptor* adaptor);
-bool lock_adaptor(traceset_adaptor* adaptor, size_t worker_id);
-void unlock_adaptor(traceset_adaptor* adaptor);
-int get_scale_advice(traceset_adaptor* adaptor);
-
-void add_tracee(traceset_adaptor* adaptor, pid_t worker_pid);
-void remove_tracee(traceset_adaptor* adaptor, pid_t worker_pid);
 
 #endif //THREADPOOL_SCALING_H

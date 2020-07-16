@@ -22,14 +22,14 @@ float calc_metric(traceset_interval* interval) {
     return result;
 }
 
-traceset_adaptor* get_adaptor() {
-    adaptor_parameters params;
+trace_adaptor* get_adaptor() {
+    trace_adaptor_params params;
     int write_syscall_nr = 1;
     params.amount_traced_syscalls = 1;
     params.traced_syscalls = &write_syscall_nr;
     params.interval_ms = 5000;
     params.scaling_metric = calc_metric;
-    traceset_adaptor* result = create_adaptor(&params);
+    trace_adaptor* result = ta_create(&params);
     if (result == NULL) {
         debug_print("%s\n", "adaptor NULL");
     }
@@ -50,7 +50,7 @@ void user_f(void *arg) {
 
 int tpool_test() {
     debug_print("%s\n", "creating tpool");
-    traceset_adaptor* adaptor = get_adaptor();
+    trace_adaptor* adaptor = get_adaptor();
     if (adaptor == NULL) {
         debug_print("%s\n", "could create traceset adaptor for tpool");
         return -1;
@@ -67,8 +67,25 @@ int tpool_test() {
     return 0;
 }
 
+int tracing_test() {
+    trace_adaptor* adaptor = get_adaptor();
+    pid_t self = getpid();
+    debug_print("%s\n", "add self as tracee");
+    ta_add_tracee(adaptor, self);
+    for (int i = 0; i < 10; ++i) {
+        debug_print("round %d: is ready for update? %d\n", i, ta_ready_for_update(adaptor));
+        debug_print("round %d: get scale advice\n", i);
+        int advice = ta_get_scale_advice(adaptor);
+        debug_print("round %d: advice to scale by %d\n", i, advice);
+        sleep(3);
+    }
+    ta_destroy(adaptor);
+    return 0;
+}
+
 int main(int argc, char **argv) {
-    return tpool_test();
+    debug_print("%s\n", "RUNNING TRACING.C TEST");
+    debug_print("TRACING.C TEST RETURN: %d\n", tracing_test());
 }
 
 
