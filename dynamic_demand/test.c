@@ -13,7 +13,7 @@
 static const size_t num_threads = 2;
 static const size_t num_items = 100;
 
-void user_f(void *arg) {
+void work_function(void *arg) {
     int *val = arg;
     int old = *val;
 
@@ -52,7 +52,7 @@ int tpool_test() {
 
     for (i = 0; i < num_items; i++) {
         vals[i] = i;
-        tpool_submit_job(tm, user_f, vals + i);
+        tpool_submit_job(tm, work_function, vals + i);
     }
 
 //    tpool_scale(tm, -1);

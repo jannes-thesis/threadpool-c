@@ -325,8 +325,10 @@ static void check_scaling(tpool* tpool_ptr, size_t wid) {
         int to_scale = ta_get_scale_advice(tpool_ptr->adaptor);
         debug_print("worker %zu got scaling advice: scale by %d\n", wid, to_scale);
         ta_unlock(tpool_ptr->adaptor);
-        if (to_scale != 0)
+        if (to_scale != 0) {
+            debug_print("worker %zu scaling now: %lu (by %d)\n", wid, current_time_ms(), to_scale);
             tpool_scale(tpool_ptr, to_scale);
+        }
     }
 }
 

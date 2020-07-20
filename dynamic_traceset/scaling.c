@@ -12,7 +12,6 @@
 #include "debug_macro.h"
 
 /* ==================== INTERNAL ==================== */
-static unsigned long current_time_ms();
 static void metric_buf_insert_entry(metric_buffer* buffer, float value, int amount_targets, unsigned long time);
 static scale_metric_datapoint* metric_buf_get_entry(metric_buffer* buffer, int offset);
 static void copy_traceset(traceset* from, traceset* to);
@@ -31,6 +30,14 @@ static int determine_scale_advice(trace_adaptor* adaptor);
          *i = (*i - 1) % METRIC_BUFFER_SIZE, cursor = buffer->ring[*i])  \
 
 /* ==================== API ==================== */
+
+unsigned long current_time_ms() {
+    struct timespec spec;
+    clock_gettime(CLOCK_REALTIME, &spec);
+
+    unsigned long ms = (unsigned long) (spec.tv_nsec / 1.0e6) + (1000 * spec.tv_sec);
+    return ms;
+}
 
 trace_adaptor* ta_create(trace_adaptor_params* params) {
     trace_adaptor* adaptor = malloc(sizeof(trace_adaptor));
@@ -108,14 +115,6 @@ void ta_remove_tracee(trace_adaptor* adaptor, pid_t worker_pid) {
 
 
 /* ==================== INTERNAL IMPL ==================== */
-
-static unsigned long current_time_ms() {
-    struct timespec spec;
-    clock_gettime(CLOCK_REALTIME, &spec);
-
-    unsigned long ms = (unsigned long) (spec.tv_nsec / 1.0e6) + (1000 * spec.tv_sec);
-    return ms;
-}
 
 static void metric_buf_insert_entry(metric_buffer* buffer, float value, int amount_targets, unsigned long time) {
     int new_entry_index = (buffer->index_newest + 1) % METRIC_BUFFER_SIZE ;

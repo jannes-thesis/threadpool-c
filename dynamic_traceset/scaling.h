@@ -50,6 +50,7 @@ typedef struct trace_adaptor {
     _Atomic(int) lock; // -1 is unlocked, lock with worker id
 } trace_adaptor;
 
+unsigned long current_time_ms(void);
 trace_adaptor* ta_create(trace_adaptor_params* params);
 void ta_destroy(trace_adaptor* adaptor);
 
