@@ -5,11 +5,10 @@
 #include "scaling.h"
 #include <stdbool.h>
 #include <stddef.h>
-#include <math.h>
 #include <malloc.h>
 #include <time.h>
-#include <stdatomic.h>
 #include <float.h>
+#include <pthread.h>
 #include "debug_macro.h"
 
 /* ==================== INTERNAL ==================== */
@@ -45,7 +44,9 @@ trace_adaptor* ta_create(trace_adaptor_params* params) {
     if (adaptor == NULL) {
         return NULL;
     }
-    adaptor->lock = -1;
+    if (pthread_spin_init(&adaptor->lock, PTHREAD_PROCESS_PRIVATE) != 0) {
+        return NULL;
+    }
     adaptor->params = *params;
     // create empty traceset
     adaptor->data.live_traceset = register_traceset(NULL, 0,
@@ -91,16 +92,22 @@ void ta_destroy(trace_adaptor* adaptor) {
 }
 
 bool ta_ready_for_update(trace_adaptor* adaptor) {
-    return (adaptor->data.last_snapshot_ms + adaptor->params.interval_ms < current_time_ms()) && (adaptor->lock == -1);
+    return (adaptor->data.last_snapshot_ms + adaptor->params.interval_ms < current_time_ms());
 }
 
-bool ta_lock(trace_adaptor* adaptor, size_t worker_id) {
-    int unlocked = -1;
-    return atomic_compare_exchange_weak(&adaptor->lock, &unlocked, worker_id);
+bool ta_trylock(trace_adaptor* adaptor) {
+    bool ret = pthread_spin_trylock(&adaptor->lock) == 0;
+    if (ret) {
+        debug_print("%s\n", "try lock succeed: yes");
+    }
+    else {
+        debug_print("%s\n", "try lock succeed: no");
+    }
+    return ret;
 }
 
 void ta_unlock(trace_adaptor* adaptor) {
-    adaptor->lock = -1;
+    pthread_spin_unlock(&adaptor->lock);
 }
 
 int ta_get_scale_advice(trace_adaptor* adaptor) {

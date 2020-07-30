@@ -55,7 +55,7 @@ typedef struct trace_adaptor_data {
 typedef struct trace_adaptor {
     trace_adaptor_params params;
     trace_adaptor_data data;
-    _Atomic(int) lock; // -1 is unlocked, lock with worker id
+    pthread_spinlock_t lock;
 } trace_adaptor;
 
 unsigned long current_time_ms(void);
@@ -63,7 +63,7 @@ trace_adaptor* ta_create(trace_adaptor_params* params);
 void ta_destroy(trace_adaptor* adaptor);
 
 bool ta_ready_for_update(trace_adaptor* adaptor);
-bool ta_lock(trace_adaptor* adaptor, size_t worker_id);
+bool ta_trylock(trace_adaptor* adaptor);
 void ta_unlock(trace_adaptor* adaptor);
 int ta_get_scale_advice(trace_adaptor* adaptor);
 

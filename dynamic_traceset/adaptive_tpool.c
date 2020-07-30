@@ -3,11 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
-#include <stdatomic.h>
 #include <unistd.h>
 #include <syscall.h>
 #include "adaptive_tpool.h"
-#include "spinlock.h"
 #include "debug_macro.h"
 
 /* ================== data structures ==================== */
@@ -17,7 +15,7 @@
 /* ----------- work queue --------------- */
 typedef struct user_function {
     tfunc f;
-    void *arg;
+    void* arg;
 } user_function;
 
 typedef enum scaling_command {
@@ -37,7 +35,7 @@ typedef struct job {
 } job;
 
 typedef struct jobqueue {
-    _Atomic(int) lock;
+    pthread_spinlock_t lock;
     job* first;
     job* last;
     size_t size;
@@ -51,7 +49,7 @@ typedef struct worker {
 } worker;
 
 typedef struct worker_list {
-    _Atomic(int) lock;
+    pthread_spinlock_t lock;
     worker* first;
     worker* last;
     size_t amount;
@@ -61,7 +59,7 @@ typedef struct worker_list {
 typedef struct tpool {
     jobqueue jobqueue;
     /** lock for thread counter and busy thread counter */
-    _Atomic(int) count_lock;
+    pthread_spinlock_t count_lock;
     volatile size_t num_threads;
     volatile size_t num_busy_threads;
     /** true once destroy call has been issued */
@@ -78,14 +76,23 @@ typedef struct worker_args {
 /* ==================== Prototypes ==================== */
 
 static void init_jobqueue(jobqueue* jq);
+
 static job* pop_next_job(jobqueue* jq);
+
 static void push_new_job(jobqueue* jq, job* new_job);
+
 static job* create_user_job(tfunc ufunc, void* uarg);
+
 static job* create_scale_job(scaling_command sc);
+
 static void check_scaling(tpool* tp, size_t wid);
+
 static void push_scale_job(jobqueue* jq, scaling_command sc);
+
 static void worker_function(worker_args* args);
+
 static void add_extra_worker(tpool* tpool_ptr);
+
 static void remove_worker(size_t worker_id, tpool* tpool_ptr);
 
 
@@ -104,6 +111,14 @@ tpool* tpool_create_2(size_t size, trace_adaptor* adaptor) {
     if (tpool_ptr == NULL) {
         return NULL;
     }
+    // initialize all spinlocks
+    if (pthread_spin_init(&tpool_ptr->count_lock, PTHREAD_PROCESS_PRIVATE)
+        + pthread_spin_init(&tpool_ptr->jobqueue.lock, PTHREAD_PROCESS_PRIVATE)
+        + pthread_spin_init(&tpool_ptr->workers.lock, PTHREAD_PROCESS_PRIVATE) != 0) {
+        // TODO: proper error handling
+        return NULL;
+    }
+
     init_jobqueue(&(tpool_ptr->jobqueue));
     if (&(tpool_ptr->jobqueue) == NULL) {
         free(tpool_ptr);
@@ -112,14 +127,12 @@ tpool* tpool_create_2(size_t size, trace_adaptor* adaptor) {
     debug_print("queue initialized: %d\n", tpool_ptr->jobqueue.lock);
     tpool_ptr->num_threads = size;
     tpool_ptr->stopping = false;
-    tpool_ptr->count_lock = -1;
     tpool_ptr->adaptor = adaptor;
 
     // create worker threads
     debug_print("%s", "creating workers\n");
     tpool_ptr->workers.amount = size;
     tpool_ptr->workers.max_id = size - 1;
-    tpool_ptr->workers.lock = -1;
     worker* current = NULL;
 
     for (int i = 0; i < size; ++i) {
@@ -158,14 +171,11 @@ bool tpool_submit_job(tpool* tpool_ptr, tfunc tfunc_ptr, void* tfunc_arg_ptr) {
     }
     jobqueue* jobqueue_ptr = &(tpool_ptr->jobqueue);
     // grab lock on jobqueue
-    int expected = -1;
-    while (!atomic_compare_exchange_weak(&jobqueue_ptr->lock, &expected, 0)) {
-        expected = -1;
-    }
+    pthread_spin_lock(&jobqueue_ptr->lock);
     // push job to queue
     push_new_job(jobqueue_ptr, new_job_ptr);
     // release lock
-    jobqueue_ptr->lock = -1;
+    pthread_spin_unlock(&jobqueue_ptr->lock);
     return true;
 }
 
@@ -175,21 +185,17 @@ bool tpool_submit_job(tpool* tpool_ptr, tfunc tfunc_ptr, void* tfunc_arg_ptr) {
  */
 void tpool_wait(tpool* tpool_ptr) {
     // while there are still busy threads or the jobqueue is not empty wait
-    while(tpool_ptr->num_busy_threads != 0 || tpool_ptr->jobqueue.size != 0) {}
+    while (tpool_ptr->num_busy_threads != 0 || tpool_ptr->jobqueue.size != 0) {}
 }
 
 void tpool_destroy(tpool* tpool_ptr) {
     if (tpool_ptr == NULL) return;
 
     jobqueue queue = tpool_ptr->jobqueue;
-    jobqueue* jobqueue_ptr = &queue;
     tpool_ptr->stopping = true;
 
     // lock work queue and clear it
-    int expected = -1;
-    while (!atomic_compare_exchange_weak(&(queue.lock), &expected, 0)) {
-        expected = -1;
-    }
+    pthread_spin_lock(&queue.lock);
     job* to_free = queue.first;
     while (to_free != NULL) {
         job* new_to_free = to_free->next;
@@ -197,7 +203,7 @@ void tpool_destroy(tpool* tpool_ptr) {
         to_free = new_to_free;
     }
     queue.size = 0;
-    queue.lock = -1;
+    pthread_spin_unlock(&queue.lock);
 
     // wait for all threads to be idle (in this case all must have exited)
     tpool_wait(tpool_ptr);
@@ -218,24 +224,20 @@ bool tpool_scale(tpool* tp, int diff) {
         diff = MAX_SIZE - tp->num_threads;
     }
     // grab lock on jobqueue
-    int expected = -1;
-    while (!atomic_compare_exchange_weak(&tp->jobqueue.lock, &expected, 0)) {
-        expected = -1;
-    }
+    pthread_spin_lock(&tp->jobqueue.lock);
     if (diff < 0) {
         while (diff < 0) {
             push_scale_job(&tp->jobqueue, Terminate);
             diff++;
         }
-    }
-    else {
+    } else {
         while (diff > 0) {
             push_scale_job(&tp->jobqueue, Clone);
             diff--;
         }
     }
     // release lock
-    tp->jobqueue.lock = -1;
+    pthread_spin_unlock(&tp->jobqueue.lock);
     return true;
 }
 
@@ -249,7 +251,7 @@ static job* create_user_job(tfunc ufunc, void* uarg) {
     new_job->next = NULL;
     new_job->is_uf = true;
     new_job->wi.uf.f = ufunc;
-    new_job->wi.uf.arg =  uarg;
+    new_job->wi.uf.arg = uarg;
     return new_job;
 }
 
@@ -264,15 +266,13 @@ static job* create_scale_job(scaling_command sc) {
     return new_job;
 }
 
-static void init_jobqueue(jobqueue* jobqueue_ptr) {
-    if (jobqueue_ptr == NULL) {
+static void init_jobqueue(jobqueue* jq) {
+    if (jq == NULL) {
         return;
     }
-    jobqueue_ptr->first = NULL;
-    jobqueue_ptr->last = NULL;
-    jobqueue_ptr->lock = -1;
-    debug_print("%d\n", jobqueue_ptr->lock);
-    jobqueue_ptr->size = 0;
+    jq->first = NULL;
+    jq->last = NULL;
+    jq->size = 0;
 }
 
 /*
@@ -305,7 +305,7 @@ static void push_new_job(jobqueue* jq, job* new_job) {
     if (jq->size == 0) {
         jq->first = new_job;
     }
-    // otherwise the old last should point to the new job
+        // otherwise the old last should point to the new job
     else {
         job* old_last = jq->last;
         old_last->next = new_job;
@@ -330,7 +330,7 @@ static void push_scale_job(jobqueue* jq, scaling_command sc) {
  */
 static void check_scaling(tpool* tpool_ptr, size_t wid) {
     debug_print("worker %zu check for potential scaling\n", wid);
-    if (ta_ready_for_update(tpool_ptr->adaptor) && ta_lock(tpool_ptr->adaptor, wid)) {
+    if (ta_ready_for_update(tpool_ptr->adaptor) && ta_trylock(tpool_ptr->adaptor)) {
         debug_print("worker %zu get scaling advice\n", wid);
         int to_scale = ta_get_scale_advice(tpool_ptr->adaptor);
         debug_print("worker %zu got scaling advice: scale by %d\n", wid, to_scale);
@@ -339,8 +339,7 @@ static void check_scaling(tpool* tpool_ptr, size_t wid) {
             debug_print("worker %zu SCALING now: %lu (by %d)\n", wid, current_time_ms(), to_scale);
             tpool_scale(tpool_ptr, to_scale);
         }
-    }
-    else {
+    } else {
         debug_print("worker %zu no scaling\n", wid);
     }
 }
@@ -353,7 +352,6 @@ static void worker_function(worker_args* args) {
     debug_print("worker %zu added as tracee (pid: %d)\n", args->wid, worker_pid);
     jobqueue* jobqueue_ptr = &(tpool_ptr->jobqueue);
     job* job_todo;
-    int lock_available = -1;
     while (!tpool_ptr->stopping) {
         check_scaling(tpool_ptr, args->wid);
         while (jobqueue_ptr->size == 0) {
@@ -362,9 +360,7 @@ static void worker_function(worker_args* args) {
                 break;
         }
         /* LOCK jobqueue */
-        while (!atomic_compare_exchange_weak(&(jobqueue_ptr->lock), &lock_available, args->wid)) {
-            lock_available = -1;
-        }
+        pthread_spin_lock(&jobqueue_ptr->lock);
         // if thread pool is instructed to be destroyed, do not process next job, but exit
         if (tpool_ptr->stopping) {
             jobqueue_ptr->lock = -1;
@@ -374,17 +370,15 @@ static void worker_function(worker_args* args) {
         debug_print("queue size: %zu\n", jobqueue_ptr->size);
         debug_print("worker %zu popping job\n", args->wid);
         job_todo = pop_next_job(jobqueue_ptr);
-        jobqueue_ptr->lock = -1;
+        pthread_spin_unlock(&jobqueue_ptr->lock);
         /* UNLOCKED jobqueue */
 
         // check if really obtained job (queue could have been empty)
         if (job_todo != NULL && job_todo->is_uf) {
             // --- busy counter LOCKED
-            while (!atomic_compare_exchange_weak(&(tpool_ptr->count_lock), &lock_available, args->wid)) {
-                lock_available = -1;
-            }
+            pthread_spin_lock(&tpool_ptr->count_lock);
             tpool_ptr->num_busy_threads += 1;
-            tpool_ptr->count_lock = -1;
+            pthread_spin_unlock(&tpool_ptr->count_lock);
             // --- busy counter UNLOCKED
             debug_print("worker %zu executing job\n", args->wid);
             // execute job
@@ -393,40 +387,30 @@ static void worker_function(worker_args* args) {
             free(job_todo);
             // decrease number of threads executing a job
             // --- busy counter LOCKED
-            while (!atomic_compare_exchange_weak(&(tpool_ptr->count_lock), &lock_available, args->wid)) {
-                lock_available = -1;
-            }
+            pthread_spin_lock(&tpool_ptr->count_lock);
             tpool_ptr->num_busy_threads -= 1;
-            tpool_ptr->count_lock = -1;
+            pthread_spin_unlock(&tpool_ptr->count_lock);
             // --- busy counter UNLOCKED
-        }
-        else if (job_todo != NULL) {
+        } else if (job_todo != NULL) {
             if (job_todo->wi.sc == Clone) {
                 debug_print("worker %zu performing clone\n", args->wid);
-                while (!atomic_compare_exchange_weak(&(tpool_ptr->workers.lock), &lock_available, args->wid)) {
-                    lock_available = -1;
-                }
+                pthread_spin_lock(&tpool_ptr->workers.lock);
                 add_extra_worker(tpool_ptr);
-                tpool_ptr->workers.lock = -1;
-            }
-            else if (job_todo->wi.sc == Terminate) {
+                pthread_spin_unlock(&tpool_ptr->workers.lock);
+            } else if (job_todo->wi.sc == Terminate) {
                 debug_print("worker %zu performing terminate\n", args->wid);
                 break;
             }
         }
     }
     // remove from workers list
-    while (!atomic_compare_exchange_weak(&(tpool_ptr->workers.lock), &lock_available, args->wid)) {
-        lock_available = -1;
-    }
+    pthread_spin_lock(&tpool_ptr->workers.lock);
     remove_worker(args->wid, tpool_ptr);
-    tpool_ptr->workers.lock = -1;
+    pthread_spin_unlock(&tpool_ptr->workers.lock);
     // update active thread amount
-    while (!atomic_compare_exchange_weak(&(tpool_ptr->count_lock), &lock_available, args->wid)) {
-        lock_available = -1;
-    }
+    pthread_spin_lock(&tpool_ptr->count_lock);
     tpool_ptr->num_threads--;
-    tpool_ptr->count_lock = -1;
+    pthread_spin_unlock(&tpool_ptr->count_lock);
     ta_remove_tracee(tpool_ptr->adaptor, worker_pid);
 }
 
@@ -435,7 +419,7 @@ static void worker_function(worker_args* args) {
  * @param worker_id
  * @param tpool_ptr
  */
-static void remove_worker(size_t worker_id, tpool *tpool_ptr) {
+static void remove_worker(size_t worker_id, tpool* tpool_ptr) {
     worker* current = tpool_ptr->workers.first;
     worker* last = NULL;
     while (current != NULL) {
@@ -443,8 +427,7 @@ static void remove_worker(size_t worker_id, tpool *tpool_ptr) {
             // if first
             if (last == NULL) {
                 tpool_ptr->workers.first = current->next;
-            }
-            else {
+            } else {
                 last->next = current->next;
             }
             // if last
@@ -464,7 +447,7 @@ static void remove_worker(size_t worker_id, tpool *tpool_ptr) {
  * worker list must be locked/unlocked by caller
  * @param tpool_ptr
  */
-static void add_extra_worker(tpool *tpool_ptr) {
+static void add_extra_worker(tpool* tpool_ptr) {
     pthread_t thread;
     worker* new_worker = malloc(sizeof(worker));
     new_worker->wid = tpool_ptr->workers.max_id + 1;
@@ -480,9 +463,9 @@ static void add_extra_worker(tpool *tpool_ptr) {
     pthread_detach(thread);
     new_worker->thread = thread;
 
-    spinlock_lock(&tpool_ptr->count_lock, -1, 0);
+    pthread_spin_lock(&tpool_ptr->count_lock);
     tpool_ptr->num_threads += 1;
-    spinlock_unlock(&tpool_ptr->count_lock, -1, 0);
+    pthread_spin_unlock(&tpool_ptr->count_lock);
 
     // append worker to worker list
     tpool_ptr->workers.last->next = new_worker;
