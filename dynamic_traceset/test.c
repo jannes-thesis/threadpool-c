@@ -16,10 +16,13 @@
 static const size_t NUM_THREADS = 1;
 static const size_t NUM_ITEMS = 1000;
 
-float calc_metric(traceset_interval* interval) {
-    unsigned long interval_length = interval->start - interval->end;
-    float result = (double) interval->interval_data.data->write_bytes / (double) interval_length;
+double calc_metric(traceset_interval* interval) {
+    unsigned long interval_length = interval->end - interval->start;
+    double result = (double) interval->interval_data.data->write_bytes / (double) interval_length;
+    debug_print("start %lu\n", interval->start);
+    debug_print("end %lu\n", interval->end);
     debug_print("bytes written / ms: %f\n", result);
+    debug_print("total bytes written %llu\n", interval->interval_data.data->write_bytes);
     return result;
 }
 
@@ -29,7 +32,9 @@ trace_adaptor* get_adaptor(int interval_ms) {
     params.amount_traced_syscalls = 1;
     params.traced_syscalls = &write_syscall_nr;
     params.interval_ms = interval_ms;
-    params.scaling_metric = calc_metric;
+    params.calc_scale_metric = calc_metric;
+    params.calc_idle_metric = calc_metric;
+    params.step_size = 2;
     trace_adaptor* result = ta_create(&params);
     if (result == NULL) {
         debug_print("%s\n", "adaptor NULL");
@@ -43,23 +48,27 @@ void work_function(void *arg) {
     char filename[50];
     sprintf(filename, "wout%d.txt", *valp);
     FILE* fp = fopen(filename, "w");
+    int fd = fileno(fp);
     for (int i = 0; i < 1000; ++i) {
         fprintf(fp, "this is a line\n");
+        fsync(fd);
     }
     debug_print("%s %d\n", "user function end", *valp);
 }
 
 int tpool_test() {
+    int is[NUM_ITEMS];
     debug_print("%s\n", "creating tpool");
     trace_adaptor* adaptor = get_adaptor(2000);
     if (adaptor == NULL) {
-        debug_print("%s\n", "could create traceset adaptor for tpool");
+        debug_print("%s\n", "could not create traceset adaptor for tpool");
         return -1;
     }
     threadpool tm = tpool_create_2(NUM_THREADS, adaptor);
     debug_print("%s\n", "start submitting jobs to tpool");
     for (int i = 0; i < NUM_ITEMS; i++) {
-        tpool_submit_job(tm, work_function, &i);
+        is[i] = i;
+        tpool_submit_job(tm, work_function, &is[i]);
     }
     debug_print("%s\n", "waiting for tpool");
     tpool_wait(tm);
@@ -90,6 +99,7 @@ int tracing_test() {
  * @param num_items
  */
 int tpool_write_work_test(int interval_ms, int num_items) {
+    int is[NUM_ITEMS];
     debug_print("%s\n", "creating tpool");
     trace_adaptor* adaptor = get_adaptor(interval_ms);
     if (adaptor == NULL) {
@@ -99,7 +109,8 @@ int tpool_write_work_test(int interval_ms, int num_items) {
     threadpool tm = tpool_create_2(1, adaptor);
     debug_print("%s\n", "start submitting jobs to tpool");
     for (int i = 0; i < num_items; i++) {
-        tpool_submit_job(tm, work_function, &i);
+        is[i] = i;
+        tpool_submit_job(tm, work_function, &is[i]);
         if (i < num_items / 4)
             usleep(100000); // 100 ms
         else if (i < num_items / 2)
@@ -115,7 +126,7 @@ int tpool_write_work_test(int interval_ms, int num_items) {
     tpool_destroy(tm);
     debug_print("%s\n", "deleting worker output");
     char filename[50];
-    for (int j = 0; j < num_items; ++j) {
+    for (int j = 0; j < num_items; j++) {
         sprintf(filename, "wout%d.txt", j);
         remove(filename);
     }
@@ -137,7 +148,7 @@ int main(int argc, char **argv) {
         }
         else if (strcmp(argv[1], "tpool_incload") == 0) {
             debug_print("%s\n", "RUNNING SIMPLE TPOOL TEST");
-            debug_print("TRACING.C TEST RETURN: %d\n", tpool_write_work_test(3000, 10000));
+            debug_print("TRACING.C TEST RETURN: %d\n", tpool_write_work_test(1000, 200));
         }
     }
     return 0;

@@ -9,6 +9,9 @@
 #include <stdbool.h>
 #include "scaling.h"
 
+// make this a parameter later
+#define MAX_SIZE 64
+
 // the thread pool
 typedef struct tpool* threadpool;
 

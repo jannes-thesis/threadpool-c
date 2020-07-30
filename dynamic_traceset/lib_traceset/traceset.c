@@ -46,6 +46,13 @@ traceset* register_traceset(pid_t* target_pids, int amount_targets, int* syscall
     }
 }
 
+void free_traceset(traceset* tset) {
+    deregister_traceset(tset->data->traceset_id);
+    munmap(tset->data, sizeof(traceset_data));
+    free(tset->syscall_nrs);
+    free(tset);
+}
+
 int deregister_traceset(int traceset_id) {
     return (int) syscall(437, traceset_id, NULL, -1);
 }

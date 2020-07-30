@@ -12,14 +12,17 @@
 
 #define METRIC_BUFFER_SIZE 10
 
-typedef struct scale_metric_datapoint {
-    float metric;
+typedef struct metric_datapoint {
+    /* adaptor tries to maximize this */
+    double scale_metric;
+    /* adaptor resets pool when this drops to much lower than previously observed */
+    double idle_metric;
     int amount_targets;
     unsigned long time;
-} scale_metric_datapoint;
+} metric_datapoint;
 
 typedef struct metric_buffer {
-    scale_metric_datapoint ring[METRIC_BUFFER_SIZE];
+    metric_datapoint ring[METRIC_BUFFER_SIZE];
     size_t size;
     int index_newest;
 } metric_buffer;
@@ -31,17 +34,22 @@ typedef struct traceset_interval {
 } traceset_interval;
 
 typedef struct trace_adaptor_params {
+    /** algorithm parameters */
     unsigned long interval_ms;
+    unsigned int step_size;
+    /** user workload parameters */
     unsigned int amount_traced_syscalls;
     int* traced_syscalls;
-    float (*scaling_metric) (traceset_interval* interval_data);
+    double (*calc_scale_metric) (traceset_interval* interval_data);
+    double (*calc_idle_metric) (traceset_interval* interval_data);
 } trace_adaptor_params;
 
 typedef struct trace_adaptor_data {
     traceset* live_traceset;
     traceset* snapshot_traceset;
     unsigned long last_snapshot_ms;
-    metric_buffer scale_metric_history;
+    metric_buffer metric_history;
+    double idle_metric_max;
 } trace_adaptor_data;
 
 typedef struct trace_adaptor {

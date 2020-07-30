@@ -35,6 +35,7 @@ typedef struct traceset {
 } traceset;
 
 traceset* register_traceset(pid_t* target_pids, int amount_targets, int* syscall_nrs, int amount_syscalls);
+void free_traceset(traceset* tset);
 int deregister_traceset(int traceset_id);
 int register_traceset_targets(int traceset_id, pid_t* target_pids, int amount_targets);
 int deregister_traceset_targets(int traceset_id, pid_t* target_pids, int amount_targets);

@@ -5,7 +5,9 @@
 #include <stdbool.h>
 #include <stdatomic.h>
 #include <unistd.h>
+#include <syscall.h>
 #include "adaptive_tpool.h"
+#include "spinlock.h"
 #include "debug_macro.h"
 
 /* ================== data structures ==================== */
@@ -205,8 +207,16 @@ void tpool_destroy(tpool* tpool_ptr) {
 
 // NO ERROR HANDLING YET
 bool tpool_scale(tpool* tp, int diff) {
-    if (tp->num_threads + diff < 0)
-        return false;
+    // don't go below one worker thread
+    if (tp->num_threads + diff <= 0) {
+        debug_print("%s\n", "scaling down would drop below 1 worker, only scale down to 1 worker");
+        diff = 1 - tp->num_threads;
+    }
+    // don't go above max worker amount
+    if (tp->num_threads + diff > MAX_SIZE) {
+        debug_print("%s\n", "scaling up would go above max amount workers, only scale to max");
+        diff = MAX_SIZE - tp->num_threads;
+    }
     // grab lock on jobqueue
     int expected = -1;
     while (!atomic_compare_exchange_weak(&tp->jobqueue.lock, &expected, 0)) {
@@ -289,7 +299,7 @@ static job* pop_next_job(jobqueue* jq) {
  * pushes new job to the end of the jobqueue
  */
 static void push_new_job(jobqueue* jq, job* new_job) {
-    debug_print("%s", "push\n");
+//    debug_print("%s", "push\n");
     new_job->next = NULL;
     // if queue is empty new job becomes head and last
     if (jq->size == 0) {
@@ -326,15 +336,18 @@ static void check_scaling(tpool* tpool_ptr, size_t wid) {
         debug_print("worker %zu got scaling advice: scale by %d\n", wid, to_scale);
         ta_unlock(tpool_ptr->adaptor);
         if (to_scale != 0) {
-            debug_print("worker %zu scaling now: %lu (by %d)\n", wid, current_time_ms(), to_scale);
+            debug_print("worker %zu SCALING now: %lu (by %d)\n", wid, current_time_ms(), to_scale);
             tpool_scale(tpool_ptr, to_scale);
         }
+    }
+    else {
+        debug_print("worker %zu no scaling\n", wid);
     }
 }
 
 static void worker_function(worker_args* args) {
     tpool* tpool_ptr = args->tp;
-    pid_t worker_pid = getpid();
+    pid_t worker_pid = syscall(__NR_gettid);
     debug_print("worker %zu starting (pid: %d)\n", args->wid, worker_pid);
     ta_add_tracee(tpool_ptr->adaptor, worker_pid);
     debug_print("worker %zu added as tracee (pid: %d)\n", args->wid, worker_pid);
@@ -466,6 +479,10 @@ static void add_extra_worker(tpool *tpool_ptr) {
     pthread_create(&thread, NULL, (void* (*)(void*)) worker_function, (void*) worker_args_ptr);
     pthread_detach(thread);
     new_worker->thread = thread;
+
+    spinlock_lock(&tpool_ptr->count_lock, -1, 0);
+    tpool_ptr->num_threads += 1;
+    spinlock_unlock(&tpool_ptr->count_lock, -1, 0);
 
     // append worker to worker list
     tpool_ptr->workers.last->next = new_worker;

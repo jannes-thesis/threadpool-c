@@ -9,11 +9,12 @@
 #include <malloc.h>
 #include <time.h>
 #include <stdatomic.h>
+#include <float.h>
 #include "debug_macro.h"
 
 /* ==================== INTERNAL ==================== */
-static void metric_buf_insert_entry(metric_buffer* buffer, float value, int amount_targets, unsigned long time);
-static scale_metric_datapoint* metric_buf_get_entry(metric_buffer* buffer, int offset);
+static void metric_buf_insert_entry(metric_buffer* buffer, double scale_metric, double idle_metric, int amount_targets, unsigned long time);
+static metric_datapoint metric_buf_get_entry(metric_buffer* buffer, int offset);
 static void copy_traceset(traceset* from, traceset* to);
 static void diff_traceset(traceset* later, traceset* earlier, unsigned long earlier_time, traceset_interval* diff);
 static bool update_snapshot(trace_adaptor* adaptor);
@@ -48,7 +49,7 @@ trace_adaptor* ta_create(trace_adaptor_params* params) {
     adaptor->params = *params;
     // create empty traceset
     adaptor->data.live_traceset = register_traceset(NULL, 0,
-                                                    params->traced_syscalls, params->amount_traced_syscalls);
+                                                    params->traced_syscalls, (int) params->amount_traced_syscalls);
     if (adaptor->data.live_traceset == NULL) {
         goto err;
     }
@@ -79,7 +80,14 @@ trace_adaptor* ta_create(trace_adaptor_params* params) {
 }
 
 void ta_destroy(trace_adaptor* adaptor) {
-    // TODO
+    // free (includes deregister syscall) live traceset
+    free_traceset(adaptor->data.live_traceset);
+    // free snapshot (only some fields are allocated)
+    free(adaptor->data.snapshot_traceset->data);
+    free(adaptor->data.snapshot_traceset->sdata_arr);
+    free(adaptor->data.snapshot_traceset);
+    // free params
+    free(adaptor->params.traced_syscalls);
 }
 
 bool ta_ready_for_update(trace_adaptor* adaptor) {
@@ -106,30 +114,42 @@ int ta_get_scale_advice(trace_adaptor* adaptor) {
 }
 
 void ta_add_tracee(trace_adaptor* adaptor, pid_t worker_pid) {
-    register_traceset_target(adaptor->data.live_traceset->data->traceset_id, worker_pid);
+    if (register_traceset_target(adaptor->data.live_traceset->data->traceset_id, worker_pid)) {
+        debug_print("registering %d as target successful\n", worker_pid);
+    }
+    else {
+        debug_print("registering %d as target failed\n", worker_pid);
+    }
 }
 
 void ta_remove_tracee(trace_adaptor* adaptor, pid_t worker_pid) {
-    deregister_traceset_target(adaptor->data.live_traceset->data->traceset_id, worker_pid);
+    if (deregister_traceset_target(adaptor->data.live_traceset->data->traceset_id, worker_pid)) {
+        debug_print("deregistering %d as target successful\n", worker_pid);
+    }
+    else {
+        debug_print("deregistering %d as target failed\n", worker_pid);
+    }
 }
 
 
 /* ==================== INTERNAL IMPL ==================== */
 
-static void metric_buf_insert_entry(metric_buffer* buffer, float value, int amount_targets, unsigned long time) {
+static void metric_buf_insert_entry(metric_buffer* buffer, double scale_metric, double idle_metric, int amount_targets, unsigned long time) {
     int new_entry_index = (buffer->index_newest + 1) % METRIC_BUFFER_SIZE ;
-    buffer->ring[new_entry_index].metric = value;
+    buffer->ring[new_entry_index].scale_metric = scale_metric;
+    buffer->ring[new_entry_index].idle_metric = idle_metric;
     buffer->ring[new_entry_index].amount_targets = amount_targets;
     buffer->ring[new_entry_index].time = time;
+    buffer->index_newest = new_entry_index;
     if (buffer->size < METRIC_BUFFER_SIZE)
         buffer->size++;
 }
 
-static scale_metric_datapoint* metric_buf_get_entry(metric_buffer* buffer, int offset) {
-    return &buffer->ring[(buffer->index_newest + offset) % METRIC_BUFFER_SIZE];
+static metric_datapoint metric_buf_get_entry(metric_buffer* buffer, int offset) {
+    return buffer->ring[(buffer->index_newest + offset) % METRIC_BUFFER_SIZE];
 }
 
-static void init_traceset_interval(traceset_interval* interval, int amount_syscalls) {
+static void init_traceset_interval(traceset_interval* interval, unsigned int amount_syscalls) {
     // TODO error handling
     interval->interval_data.data = malloc(sizeof(traceset_data));
     interval->interval_data.sdata_arr = malloc(amount_syscalls * sizeof(traceset_syscall_data));
@@ -181,8 +201,9 @@ static bool update_snapshot(trace_adaptor* adaptor) {
         copy_traceset(adaptor->data.live_traceset, adaptor->data.snapshot_traceset);
         adaptor->data.last_snapshot_ms = current_time_ms();
         if (adaptor->data.snapshot_traceset->data->amount_targets == amount_targets_snapshot) {
-            float scale_metric = adaptor->params.scaling_metric(&interval_data);
-            metric_buf_insert_entry(&adaptor->data.scale_metric_history, scale_metric, amount_targets_snapshot,
+            double scale_metric = adaptor->params.calc_scale_metric(&interval_data);
+            double idle_metric = adaptor->params.calc_idle_metric(&interval_data);
+            metric_buf_insert_entry(&adaptor->data.metric_history, scale_metric, idle_metric, amount_targets_snapshot,
                                     interval_data.end);
             debug_print("%s\n", "took valid interval snapshot");
             ret = true;
@@ -199,19 +220,46 @@ static bool update_snapshot(trace_adaptor* adaptor) {
     return ret;
 }
 
+/**
+ * get advice on how (by what amounts) to scale the worker pool
+ * @param adaptor
+ * @return the difference of worker count: (#desired - #current)
+ */
 static int determine_scale_advice(trace_adaptor* adaptor) {
-    // if current interval scale metric is worse than one before:
-    //      adjust back to previous size OR if not utilized
-    scale_metric_datapoint* current_interval_metric;
-    scale_metric_datapoint* previous_interval_metric;
-    if (adaptor->data.scale_metric_history.size > 1) {
-        current_interval_metric = metric_buf_get_entry(&adaptor->data.scale_metric_history, 0);
-        previous_interval_metric = metric_buf_get_entry(&adaptor->data.scale_metric_history, 1);
-        if (previous_interval_metric->metric > current_interval_metric->metric) {
-            return previous_interval_metric->amount_targets - current_interval_metric->amount_targets;
+    metric_datapoint previous_data;
+    metric_datapoint current_data;
+    double scale_metric_diff;
+    double scale_metric_diff_rel;
+
+    if (adaptor->data.metric_history.size == 0) {
+        return 0;
+    }
+    // always scale up initially
+    else if (adaptor->data.metric_history.size == 1) {
+        return (int) adaptor->params.step_size;
+    }
+    else if (adaptor->data.metric_history.size > 1) {
+        previous_data = metric_buf_get_entry(&adaptor->data.metric_history, -1);
+        current_data = metric_buf_get_entry(&adaptor->data.metric_history, 0);
+        debug_print("previous metric: %f\n", previous_data.scale_metric);
+        debug_print("current metric: %f\n", current_data.scale_metric);
+        scale_metric_diff = current_data.scale_metric - previous_data.scale_metric;
+        scale_metric_diff_rel = scale_metric_diff / previous_data.scale_metric;
+
+        // if diff is very close to 0 (or exactly 0)
+        if (scale_metric_diff > 100 * -DBL_MIN && scale_metric_diff < 100 * DBL_MIN) {
+            return 0;
+        }
+        // scale_metric increased by at least 10%
+        if (scale_metric_diff >= 0 && scale_metric_diff_rel >= 0.1) {
+            return (int) adaptor->params.step_size;
+        }
+        // scale metric decreased by at least 10%
+        else if (scale_metric_diff < 0 && scale_metric_diff_rel <= -0.1){
+            return previous_data.amount_targets - current_data.amount_targets;
         }
         else {
-            return current_interval_metric->amount_targets;
+            return 0;
         }
     }
 }
