@@ -93,6 +93,33 @@ int tracing_test() {
     return 0;
 }
 
+int peak_int(void* mem) {
+    int* ptr = (int*) mem;
+    return ptr[0];
+}
+
+long peak_long(void* mem) {
+    long* ptr = (long*) mem;
+    return ptr[0];
+}
+
+int traceset_test(pid_t tracee) {
+    int* write_syscall = malloc(sizeof(int));
+    *write_syscall = 1;
+    traceset* tset = register_traceset(NULL, 0, write_syscall, 1);
+    debug_print("%s\n", "add tracee");
+    bool is_success = register_traceset_target(tset->data->traceset_id, tracee);
+    if (is_success) {
+        debug_print("%s\n", "success");
+    } else {
+        debug_print("%s\n", "failure");
+    }
+    traceset_data* tset_data = tset->data;
+    traceset_syscall_data* tset_sysdata = tset->sdata_arr;
+    deregister_traceset(tset->data->traceset_id);
+    return 0;
+}
+
 /**
  * a test run where the items are submitted to the pool at increasing frequency
  * @param interval_ms
@@ -149,6 +176,11 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[1], "tpool_incload") == 0) {
             debug_print("%s\n", "RUNNING SIMPLE TPOOL TEST");
             debug_print("TRACING.C TEST RETURN: %d\n", tpool_write_work_test(1000, 200));
+        }
+        else if (strcmp(argv[1], "traceset") == 0) {
+            pid_t tracee = atoi(argv[2]);
+            debug_print("%s\n", "RUNNING TRACESET WITH TARGET TEST");
+            debug_print("TRACESET TEST RETURN: %d\n", traceset_test(tracee));
         }
     }
     return 0;
