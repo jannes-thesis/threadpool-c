@@ -75,6 +75,7 @@ typedef struct tpool
     /** true once destroy call has been issued */
     bool stopping;
     worker_list workers;
+    bool is_static;
 } tpool;
 
 typedef struct worker_args
@@ -116,10 +117,18 @@ tpool *tpool_create(size_t size, AdapterParameters *adaptor_params)
     {
         return NULL;
     }
-    if (!new_adapter(adaptor_params))
+    if (adaptor_params == NULL)
     {
-        free(tpool_ptr);
-        return NULL;
+        tpool_ptr->is_static = true;
+    }
+    else
+    {
+        if (!new_adapter(adaptor_params))
+        {
+            free(tpool_ptr);
+            return NULL;
+        }
+        tpool_ptr->is_static = false;
     }
     // initialize all spinlocks
     if (pthread_spin_init(&tpool_ptr->count_lock, PTHREAD_PROCESS_PRIVATE) + pthread_spin_init(&tpool_ptr->jobqueue.lock, PTHREAD_PROCESS_PRIVATE) + pthread_spin_init(&tpool_ptr->workers.lock, PTHREAD_PROCESS_PRIVATE) != 0)
@@ -364,10 +373,11 @@ static void push_scale_job(jobqueue *jq, scaling_command sc)
     jq->size += 1;
 }
 
-static unsigned long current_time_ms() {
+static unsigned long current_time_ms()
+{
     struct timespec spec;
     clock_gettime(CLOCK_REALTIME, &spec);
-    unsigned long ms = (unsigned long) (spec.tv_nsec / 1.0e6) + (1000 * spec.tv_sec);
+    unsigned long ms = (unsigned long)(spec.tv_nsec / 1.0e6) + (1000 * spec.tv_sec);
     return ms;
 }
 
@@ -398,13 +408,17 @@ static void worker_function(worker_args *args)
     tpool *tpool_ptr = args->tp;
     pid_t worker_pid = syscall(__NR_gettid);
     debug_print("worker %zu starting (pid: %d)\n", args->wid, worker_pid);
-    add_tracee(worker_pid);
-    debug_print("worker %zu added as tracee (pid: %d)\n", args->wid, worker_pid);
+    if (!tpool_ptr->is_static)
+    {
+        add_tracee(worker_pid);
+        debug_print("worker %zu added as tracee (pid: %d)\n", args->wid, worker_pid);
+    }
     jobqueue *jobqueue_ptr = &(tpool_ptr->jobqueue);
     job *job_todo;
     while (!tpool_ptr->stopping)
     {
-        check_scaling(tpool_ptr, args->wid);
+        if (!tpool_ptr->is_static)
+            check_scaling(tpool_ptr, args->wid);
         while (jobqueue_ptr->size == 0)
         {
             sleep(1);
@@ -470,7 +484,8 @@ static void worker_function(worker_args *args)
     pthread_spin_lock(&tpool_ptr->count_lock);
     tpool_ptr->num_threads--;
     pthread_spin_unlock(&tpool_ptr->count_lock);
-    remove_tracee(worker_pid);
+    if (!tpool_ptr->is_static)
+        remove_tracee(worker_pid);
 }
 
 /**
