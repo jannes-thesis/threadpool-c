@@ -1,0 +1,80 @@
+{
+    "static_pool-static_load": {
+        "1": 43.67976926499978,
+        "2": 40.51414751599077,
+        "3": 31.96738791599637,
+        "4": 26.362324967005407,
+        "6": 19.796102353007882,
+        "7": 17.92536774399923,
+        "8": 30.50339465099387,
+        "9": 32.05612022799323,
+        "10": 30.871594327996718,
+        "11": 29.824816710999585,
+        "12": 29.528620842000237,
+        "13": 21.139223613005015,
+        "14": 12.887558628994157,
+        "15": 12.467210581002291,
+        "16": 10.819008008998935
+    },
+    "static_pool-inc_load": {
+        "1": 46.71873014399898,
+        "2": 85.22735166699567,
+        "3": 66.86063720799575,
+        "4": 54.68889668000338,
+        "6": 40.691907849992276,
+        "7": 38.90103474201169,
+        "8": 33.99826954600576,
+        "9": 33.87312463099079,
+        "10": 34.2400039290078,
+        "11": 33.10535735699523,
+        "12": 31.94620842600125,
+        "13": 31.3095527819969,
+        "14": 30.48098832600226,
+        "15": 30.645871421002084,
+        "16": 28.348311249006656
+    },
+    "static_pool-static_load-x2": {
+        "1": 109.76973579199694,
+        "2": 92.48242032599228,
+        "3": 91.67518753799959,
+        "4": 72.44436119998863,
+        "6": 37.93265397200594,
+        "7": 52.07441640199977,
+        "8": 50.95209009500104,
+        "9": 53.98956216100487,
+        "10": 52.63257613898895,
+        "11": 48.40580041600333,
+        "12": 50.77306348999264,
+        "13": 83.14800186600769,
+        "14": 87.51766815299925,
+        "15": 88.0759620040044,
+        "16": 87.7985824339994
+    },
+    "adapt_pool-static_load": {
+        "runtime": 69.68879089500115,
+        "scale_lines": [
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 11911) scaling to 2",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 11911) scaling to 3",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 11911) scaling to 2"
+        ]
+    },
+    "adapt_pool-inc_load": {
+        "runtime": 71.90899855399039,
+        "scale_lines": [
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 11963) scaling to 2"
+        ]
+    },
+    "adapt_pool-static_load-x2": {
+        "runtime": 54.628751625001314,
+        "scale_lines": [
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 12046) scaling to 2",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 12045) scaling to 1",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 12045) scaling to 64",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 12046) scaling to 3",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 12045) scaling to 63",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 12045) scaling to 64",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 12046) scaling to 4",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 12046) scaling to 5"
+        ]
+    }
+}

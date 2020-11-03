@@ -1,0 +1,31 @@
+{
+    "adapt_pool-static_load": {
+        "runtime": 27.77179960499052,
+        "scale_lines": [
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 18651) scaling to 2",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 18651) scaling to 3",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 18651) scaling to 4"
+        ]
+    },
+    "adapt_pool-inc_load": {
+        "runtime": 40.975272151990794,
+        "scale_lines": [
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 18712) scaling to 2"
+        ]
+    },
+    "adapt_pool-static_load-x2": {
+        "runtime": 32.87781665899092,
+        "scale_lines": [
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 18818) scaling to 2",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 18819) scaling to 2",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 18818) scaling to 3",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 18819) scaling to 3",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 18819) scaling to 4",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 18818) scaling to 4",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 18819) scaling to 5",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 18818) scaling to 5",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 18819) scaling to 6",
+            "../adaptive_tpool.c:265:tpool_scale(): tpool (creator pid: 18818) scaling to 6"
+        ]
+    }
+}

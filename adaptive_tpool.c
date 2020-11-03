@@ -76,6 +76,9 @@ typedef struct tpool
     bool stopping;
     worker_list workers;
     bool is_static;
+    /** pid of the process that created the pool,
+     * for logging purposes */
+    pid_t creator_pid;
 } tpool;
 
 typedef struct worker_args
@@ -117,6 +120,7 @@ tpool *tpool_create(size_t size, AdapterParameters *adaptor_params)
     {
         return NULL;
     }
+    tpool_ptr->creator_pid = syscall(__NR_gettid);
     if (adaptor_params == NULL)
     {
         tpool_ptr->is_static = true;
@@ -252,12 +256,13 @@ bool tpool_scale(tpool *tp, int diff)
         diff = 1 - tp->num_threads;
     }
     // don't go above max worker amount
-    if (tp->num_threads + diff > MAX_SIZE)
+    else if (tp->num_threads + diff > MAX_SIZE)
     {
         debug_print("%s\n", "scaling up would go above max amount workers, only scale to max");
         diff = MAX_SIZE - tp->num_threads;
     }
     // grab lock on jobqueue
+    debug_print("tpool (creator pid: %d) scaling to %d\n", tp->creator_pid, ((int) tp->num_threads) + diff);
     pthread_spin_lock(&tp->jobqueue.lock);
     if (diff < 0)
     {

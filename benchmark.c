@@ -4,13 +4,13 @@
 #include <unistd.h>
 #include <stdatomic.h>
 #include <string.h>
+#include <sys/wait.h>
 
 #include "debug_macro.h"
 #include "adapter.h"
 #include "adaptive_tpool.h"
 
-static const size_t NUM_THREADS = 1;
-static const size_t NUM_ITEMS = 1000;
+static const size_t NUM_ITEMS = 200;
 
 IntervalDerivedData calc_metrics(const IntervalDataFFI *data)
 {
@@ -38,12 +38,13 @@ void work_function(void *arg)
     int *valp = arg;
     debug_print("%s %d\n", "user function start", *valp);
     char filename[50];
-    sprintf(filename, "wout%d", *valp);
+    sprintf(filename, "out/wout%d", *valp);
     FILE *fp = fopen(filename, "w");
     int fd = fileno(fp);
-    for (int i = 0; i < 1000; ++i)
+    // roughly 100Kb
+    for (int i = 0; i < 7000; ++i)
     {
-        fprintf(fp, "this is a line\n");
+        fputs("this is a line\n", fp);
         fsync(fd);
     }
     debug_print("%s %d\n", "user function end", *valp);
@@ -69,7 +70,7 @@ void delete_files(char *output_prefix, int num_items)
     debug_print("%s\n", "deleting worker output");
     for (int j = 0; j < num_items; j++)
     {
-        sprintf(filename, "%s%d.txt", output_prefix, j);
+        sprintf(filename, "%s%d", output_prefix, j);
         remove(filename);
     }
 }
@@ -98,7 +99,15 @@ void static_load(int pool_size, int num_items)
     }
 
     tpool_wait_destroy(tpool);
-    delete_files("wout", num_items);
+    delete_files("out/wout", num_items);
+}
+
+void static_load_wrapper(void *arguments)
+{
+    int *args = (int *)arguments;
+    int pool_size = args[0];
+    int num_items = args[1];
+    static_load(pool_size, num_items);
 }
 
 /**
@@ -126,7 +135,7 @@ void inc_load(int pool_size, int interval_ms, int num_items)
             usleep(1000); // 1ms
     }
     tpool_wait_destroy(tpool);
-    delete_files("wout", num_items);
+    delete_files("out/wout", num_items);
 }
 
 int main(int argc, char **argv)
@@ -146,24 +155,54 @@ int main(int argc, char **argv)
         if (strcmp(argv[1], "adapt_pool-static_load") == 0)
         {
             printf("%s\n", "RUNNING adaptive pool - static load");
-            static_load(0, 200);
+            static_load(0, NUM_ITEMS);
         }
         else if (strcmp(argv[1], "adapt_pool-inc_load") == 0)
         {
             printf("%s\n", "RUNNING adaptive pool - inc load");
-            inc_load(0, 1000, 200);
+            inc_load(0, 1000, NUM_ITEMS);
         }
         else if (strcmp(argv[1], "static_pool-static_load") == 0)
         {
             int pool_size = atoi(argv[2]);
             printf("%s\n", "RUNNING static pool - static load");
-            static_load(pool_size, 200);
+            static_load(pool_size, NUM_ITEMS);
         }
         else if (strcmp(argv[1], "static_pool-inc_load") == 0)
         {
             int pool_size = atoi(argv[2]);
             printf("%s\n", "RUNNING static pool - inc load");
-            inc_load(pool_size, 1000, 200);
+            inc_load(pool_size, 1000, NUM_ITEMS);
+        }
+        else if (strcmp(argv[1], "adapt_pool-static_load-x2") == 0)
+        {
+            pid_t fork_pid, wait_pid;
+            int child_status = 0;
+            printf("%s\n", "RUNNING 2x adaptive pool - static load in parallel");
+            for (int i = 0; i < 2; i++)
+            {
+                fork_pid = fork();
+                if (fork_pid > 0) {
+                    static_load(0, NUM_ITEMS);
+                    exit(0);
+                }
+                while ((wait_pid = wait(&child_status)) > 0);
+            }
+            
+        }
+        else if (strcmp(argv[1], "static_pool-static_load-x2") == 0)
+        {
+            pthread_t thread1;
+            pthread_t thread2;
+            int pool_size = atoi(argv[2]);
+            printf("%s\n", "RUNNING 2x static pool - static load in parallel");
+            int *args = malloc(sizeof(int) * 2);
+            args[0] = pool_size;
+            args[1] = NUM_ITEMS;
+            pthread_create(&thread1, NULL, (void *(*)(void *))static_load_wrapper, (void *)args);
+            pthread_create(&thread2, NULL, (void *(*)(void *))static_load_wrapper, (void *)args);
+            pthread_join(thread1, NULL);
+            pthread_join(thread2, NULL);
         }
     }
     printf("done\n");
