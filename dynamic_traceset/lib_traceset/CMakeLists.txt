@@ -1,1 +1,0 @@
-add_library(lib_traceset traceset.h traceset.c debug_macro.h)
