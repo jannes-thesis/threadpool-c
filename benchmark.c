@@ -12,6 +12,7 @@
 
 char *OUTPUT_DIR;
 bool exiting = false;
+bool benchmark_running = false;
 
 IntervalDerivedData calc_metrics(const IntervalDataFFI *data)
 {
@@ -71,7 +72,13 @@ void worker_write_synced(void *arg)
     int *valp = arg;
     debug_print("%s %d\n", "user function start", *valp);
     char filename[50];
-    sprintf(filename, "%s/wout%d", OUTPUT_DIR, *valp);
+    if (benchmark_running) {
+        sprintf(filename, "%s-b/wout%d", OUTPUT_DIR, *valp);
+    }
+    else {
+        sprintf(filename, "%s/wout%d", OUTPUT_DIR, *valp);
+    }
+    printf("opening file %s\n", filename);
     FILE *fp = fopen(filename, "w");
     int fd = fileno(fp);
     // roughly 100Kb
@@ -129,6 +136,13 @@ void delete_files(int num_items)
     {
         sprintf(filename, "%s/wout%d", OUTPUT_DIR, j);
         remove(filename);
+    }
+    if (benchmark_running) {
+        for (int i = 0; i < num_items; i++)
+        {
+            sprintf(filename, "%s-b/wout%d", OUTPUT_DIR, i);
+            remove(filename);
+        }
     }
 }
 
@@ -314,6 +328,10 @@ int main(int argc, char **argv)
             printf("%s\n", "RUNNING 2x adaptive pool - static load in parallel");
             for (int i = 0; i < 2; i++)
             {
+                // make sure if running in parallel files are written to different dirs
+                if (i == 1) {
+                    benchmark_running = true;
+                }
                 fork_pid = fork();
                 if (fork_pid > 0)
                 {
@@ -328,10 +346,13 @@ int main(int argc, char **argv)
         {
             pid_t fork_pid, wait_pid;
             int child_status = 0;
-            int pool_size = atoi(argv[5]);
             printf("%s\n", "RUNNING 2x static pool - static load in parallel");
             for (int i = 0; i < 2; i++)
             {
+                // make sure if running in parallel files are written to different dirs
+                if (i == 1) {
+                    benchmark_running = true;
+                }
                 fork_pid = fork();
                 if (fork_pid > 0)
                 {

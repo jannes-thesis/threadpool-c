@@ -1,6 +1,6 @@
 #!/bin/bash
 output_dir=$1
-for i in {0..200}
+for i in {0..2000}
 do
     # GENERATE TEXT FILE WITH SAME LENGTH LINES
     # 10mb
