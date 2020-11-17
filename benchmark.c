@@ -29,7 +29,6 @@ AdapterParameters *get_adapter_params()
 
     params->amount_syscalls = 1;
     params->calc_interval_metrics = calc_metrics;
-    params->check_interval_ms = 1000;
     params->syscall_nrs = syscalls;
     return params;
 }
@@ -108,17 +107,17 @@ void worker_read_buffered(void *arg)
     debug_print("%s %d\n", "buffered read function end", *valp);
 }
 
-threadpool get_tpool(int pool_size)
+threadpool get_tpool(int pool_size, char* adapter_algo_params)
 {
     debug_print("%s\n", "creating tpool");
     if (pool_size > 0)
     {
-        return tpool_create(pool_size, NULL);
+        return tpool_create(pool_size, NULL, NULL);
     }
     else
     {
         AdapterParameters *adapter_params = get_adapter_params();
-        return tpool_create(1, adapter_params);
+        return tpool_create(1, adapter_params, adapter_algo_params);
     }
 }
 
@@ -145,10 +144,10 @@ void tpool_wait_destroy(threadpool tpool)
  * a test run where the work queue is filled at maximum rate
  * @param pool_size if 0: adaptive pool, otherwise: static
  */
-void static_load(int pool_size, int num_items, void *worker_function)
+void static_load(int pool_size, char *adapter_algo_params, int num_items, void *worker_function)
 {
     int is[num_items];
-    threadpool tpool = get_tpool(pool_size);
+    threadpool tpool = get_tpool(pool_size, adapter_algo_params);
 
     debug_print("%s\n", "start submitting jobs to tpool");
     for (int i = 0; i < num_items; i++)
@@ -165,10 +164,10 @@ void static_load(int pool_size, int num_items, void *worker_function)
  * a test run where the items are submitted to the pool at increasing frequency
  * @param pool_size if 0: adaptive pool, otherwise: static
  */
-void inc_load(int pool_size, int num_items, void *worker_function)
+void inc_load(int pool_size, char *adapter_algo_params, int num_items, void *worker_function)
 {
     int is[num_items];
-    threadpool tpool = get_tpool(pool_size);
+    threadpool tpool = get_tpool(pool_size, adapter_algo_params);
     debug_print("%s\n", "start submitting jobs to tpool");
     for (int i = 0; i < num_items; i++)
     {
@@ -191,11 +190,11 @@ void inc_load(int pool_size, int num_items, void *worker_function)
  * a test run where background writers are started in fixed intervals
  * @param pool_size if 0: adaptive pool, otherwise: static
  */
-void inc_background_load(int pool_size, int num_items, void *worker_function)
+void inc_background_load(int pool_size, char *adapter_algo_params, int num_items, void *worker_function)
 {
     int is[num_items];
     int background_id = 0;
-    threadpool tpool = get_tpool(pool_size);
+    threadpool tpool = get_tpool(pool_size, adapter_algo_params);
 
     debug_print("%s\n", "start submitting jobs to tpool");
     for (int i = 0; i < num_items; i++)
@@ -221,9 +220,10 @@ void inc_background_load(int pool_size, int num_items, void *worker_function)
 
 int main(int argc, char **argv)
 {
-    if (argc < 5)
+    if (argc != 7)
     {
-        printf("args: <worker_function> <test_name> <output_dir> <num_items> <pool_size> (just for static pool tests)\n");
+        printf("args: <worker_function> <test_name> <output_dir> <num_items> <static/adaptive> <pool_size/adapter_algo_params>\n");
+        printf("--- if 5th arg \"static\": 6th arg is pool size, if 5th arg \"adaptive\": 6th arg is adapter algorithm parameter string\n");
         printf("valid worker function:\n");
         printf("--- worker_write_synced\n");
         printf("--- worker_read_buffered\n");
@@ -241,6 +241,19 @@ int main(int argc, char **argv)
     else
     {
         int num_items = atoi(argv[4]);
+        int pool_size = 0;
+        char *adapter_algo_params = NULL;
+        if (strcmp(argv[5], "static") == 0) {
+            pool_size = atoi(argv[6]);
+        }
+        else if (strcmp(argv[5], "adaptive") == 0) {
+            adapter_algo_params = argv[6];
+        }
+        else {
+            printf("wrong 5th argument, should be either \"static\" or \"adaptive\"\n");
+            exit(1);
+        }
+
         // PARSE OUTPUT DIRECTORY
         char *output_directory = argv[3];
         if (output_directory[strlen(output_directory) - 1] == '/')
@@ -267,35 +280,32 @@ int main(int argc, char **argv)
         if (strcmp(argv[2], "adapt_pool-static_load") == 0)
         {
             printf("%s\n", "RUNNING adaptive pool - static load");
-            static_load(0, num_items, worker_function);
+            static_load(0, adapter_algo_params, num_items, worker_function);
         }
         else if (strcmp(argv[2], "adapt_pool-inc_load") == 0)
         {
             printf("%s\n", "RUNNING adaptive pool - inc load");
-            inc_load(0, num_items, worker_function);
+            inc_load(0, adapter_algo_params, num_items, worker_function);
         }
         else if (strcmp(argv[2], "adapt_pool-inc_background_load") == 0)
         {
             printf("%s\n", "RUNNING adaptive pool - inc background load");
-            inc_background_load(0, num_items, worker_function);
+            inc_background_load(0, adapter_algo_params, num_items, worker_function);
         }
         else if (strcmp(argv[2], "static_pool-static_load") == 0)
         {
-            int pool_size = atoi(argv[5]);
             printf("%s\n", "RUNNING static pool - static load");
-            static_load(pool_size, num_items, worker_function);
+            static_load(pool_size, NULL, num_items, worker_function);
         }
         else if (strcmp(argv[2], "static_pool-inc_load") == 0)
         {
-            int pool_size = atoi(argv[5]);
             printf("%s\n", "RUNNING static pool - inc load");
-            inc_load(pool_size, num_items, worker_function);
+            inc_load(pool_size, NULL, num_items, worker_function);
         }
         else if (strcmp(argv[2], "static_pool-inc_background_load") == 0)
         {
-            int pool_size = atoi(argv[5]);
             printf("%s\n", "RUNNING static pool - inc background load");
-            inc_background_load(pool_size, num_items, worker_function);
+            inc_background_load(pool_size, NULL, num_items, worker_function);
         }
         else if (strcmp(argv[2], "adapt_pool-static_load-x2") == 0)
         {
@@ -307,7 +317,7 @@ int main(int argc, char **argv)
                 fork_pid = fork();
                 if (fork_pid > 0)
                 {
-                    static_load(0, num_items, worker_function);
+                    static_load(0, adapter_algo_params, num_items, worker_function);
                     exit(0);
                 }
             }
@@ -325,7 +335,7 @@ int main(int argc, char **argv)
                 fork_pid = fork();
                 if (fork_pid > 0)
                 {
-                    static_load(pool_size, num_items, worker_function);
+                    static_load(pool_size, NULL, num_items, worker_function);
                     exit(0);
                 }
             }

@@ -24,7 +24,7 @@ typedef void (*tfunc)(void *arg);
  * when the adapter parameters are null, the pool will keep size static
  * @return
  */
-threadpool tpool_create(size_t size, AdapterParameters *adapter_params);
+threadpool tpool_create(size_t size, AdapterParameters *adapter_params, const char *adapter_algo_params);
 
 // destroy pool, let all threads finish current work and then exit
 void tpool_destroy(threadpool tpool);

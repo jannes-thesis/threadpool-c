@@ -28,7 +28,6 @@ typedef struct {
 typedef IntervalDerivedData (*CalcMetricsFunFFI)(const IntervalDataFFI*);
 
 typedef struct {
-  uint64_t check_interval_ms;
   const int32_t *syscall_nrs;
   uintptr_t amount_syscalls;
   CalcMetricsFunFFI calc_interval_metrics;
@@ -40,7 +39,16 @@ void close_adapter(void);
 
 int32_t get_scaling_advice(void);
 
-bool new_adapter(const AdapterParameters *parameters);
+/**
+ * create new adapter
+ * adapter_params: tracked syscalls and metrics calculation function
+ * algo_params: comma separated string of all algorithm parameters values (constants that tweak algo)
+ * passing by string lets benchmarks use same code for all adapter versions
+ *
+ * will panic for invalid algo parameter string, or invalid syscall number array
+ */
+bool new_adapter(const AdapterParameters *parameters,
+                 const char *algo_params_str);
 
 bool remove_tracee(int32_t tracee_pid);
 

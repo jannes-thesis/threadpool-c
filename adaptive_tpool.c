@@ -111,7 +111,7 @@ static void remove_worker(size_t worker_id, tpool *tpool_ptr);
 
 /* ====================== API ====================== */
 
-tpool *tpool_create(size_t size, AdapterParameters *adaptor_params)
+tpool *tpool_create(size_t size, AdapterParameters *adaptor_params, const char *adapter_algo_params)
 {
     tpool *tpool_ptr;
     // initialize thread pool structure
@@ -127,7 +127,7 @@ tpool *tpool_create(size_t size, AdapterParameters *adaptor_params)
     }
     else
     {
-        if (!new_adapter(adaptor_params))
+        if (!new_adapter(adaptor_params, adapter_algo_params))
         {
             free(tpool_ptr);
             return NULL;
