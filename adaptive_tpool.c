@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <pthread.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -410,9 +411,12 @@ static void check_scaling(tpool *tpool_ptr, size_t wid)
 
 static void worker_function(worker_args *args)
 {
+    char thread_name[20];
+    sprintf(thread_name, "worker-%zu", args->wid);
     tpool *tpool_ptr = args->tp;
     pid_t worker_pid = syscall(__NR_gettid);
     debug_print("worker %zu starting (pid: %d)\n", args->wid, worker_pid);
+    pthread_setname_np(pthread_self(), thread_name);
     if (!tpool_ptr->is_static)
     {
         add_tracee(worker_pid);
