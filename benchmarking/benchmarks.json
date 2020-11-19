@@ -13,7 +13,7 @@
     "static-load-write": {
         "workload_name": "static_pool-static_load",
         "worker_function": "worker_write_synced",
-        "amount_files": 60,
+        "amount_files": 100,
         "worker_threads": [
             1,
             2,
@@ -22,7 +22,15 @@
             5,
             6,
             7,
-            8
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16
         ],
         "files_dir": "../out"
     }

@@ -1,0 +1,9 @@
+targets: 12771,12772,12773,12774,12775,12776,12777,12778,12779,12780,12781,12782
+                  SYSCALL      TIME IN MS      COUNT
+                    fsync         1343543     556081
+          clock_nanosleep           43598         50
+                    write             988       2449
+                   openat              37         76
+                    futex               1         10
+                    fstat               0         76
+------------
