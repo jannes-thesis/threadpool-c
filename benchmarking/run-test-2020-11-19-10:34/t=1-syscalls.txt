@@ -1,0 +1,9 @@
+targets: 9809
+                  SYSCALL      TIME IN MS      COUNT
+                    fsync            9028      37357
+                    write             227        164
+                   openat              10          5
+                    fstat               0          5
+                  madvise               0          1
+                    futex               0          1
+------------

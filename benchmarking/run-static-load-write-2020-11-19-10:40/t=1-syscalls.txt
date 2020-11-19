@@ -1,0 +1,9 @@
+targets: 10155
+                  SYSCALL      TIME IN MS      COUNT
+                    fsync          114242     387357
+                    write            5540       1714
+                   openat             235         55
+                 mprotect               0         35
+                    fstat               0         55
+                  madvise               0          1
+------------

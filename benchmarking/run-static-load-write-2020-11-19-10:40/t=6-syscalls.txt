@@ -1,0 +1,8 @@
+targets: 10574,10575,10576,10577,10578,10579
+                  SYSCALL      TIME IN MS      COUNT
+                    fsync          387270     385465
+                    write            6168       1706
+          clock_nanosleep            5830          9
+                   openat             167         54
+                    fstat               0         54
+------------
