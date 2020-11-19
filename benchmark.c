@@ -200,6 +200,26 @@ void inc_load(int pool_size, char *adapter_algo_params, int num_items, void *wor
     delete_files(num_items);
 }
 
+void low_high_low_load(int pool_size, char *adapter_algo_params, int num_items, void *worker_function)
+{
+    int is[num_items];
+    threadpool tpool = get_tpool(pool_size, adapter_algo_params);
+    debug_print("%s\n", "start submitting jobs to tpool");
+    for (int i = 0; i < num_items; i++)
+    {
+        is[i] = i;
+        tpool_submit_job(tpool, worker_function, &is[i]);
+        if (i < num_items / 3)
+            usleep(100000); // 100 ms
+        else if (i < num_items / 3 * 2)
+            usleep(1000); // 1ms
+        else
+            usleep(100000); // 100ms
+    }
+    tpool_wait_destroy(tpool);
+    delete_files(num_items);
+}
+
 /**
  * a test run where background writers are started in fixed intervals
  * @param pool_size if 0: adaptive pool, otherwise: static
@@ -244,10 +264,12 @@ int main(int argc, char **argv)
         printf("valid test names:\n");
         printf("--- adapt_pool-static_load\n");
         printf("--- adapt_pool-inc_load\n");
+        printf("--- adapt_pool-low_high_low_load\n");
         printf("--- adapt_pool-inc_background_load\n");
         printf("--- adapt_pool-static_load-x2\n");
         printf("--- static_pool-static_load\n");
         printf("--- static_pool-inc_load\n");
+        printf("--- static_pool-low_high_low_load\n");
         printf("--- static_pool-inc_background_load\n");
         printf("--- static_pool-static_load-x2\n");
         return -1;
@@ -301,6 +323,11 @@ int main(int argc, char **argv)
             printf("%s\n", "RUNNING adaptive pool - inc load");
             inc_load(0, adapter_algo_params, num_items, worker_function);
         }
+        else if (strcmp(argv[2], "adapt_pool-low_high_low_load") == 0)
+        {
+            printf("%s\n", "RUNNING adaptive pool - low high low load");
+            low_high_low_load(0, adapter_algo_params, num_items, worker_function);
+        }
         else if (strcmp(argv[2], "adapt_pool-inc_background_load") == 0)
         {
             printf("%s\n", "RUNNING adaptive pool - inc background load");
@@ -315,6 +342,11 @@ int main(int argc, char **argv)
         {
             printf("%s\n", "RUNNING static pool - inc load");
             inc_load(pool_size, NULL, num_items, worker_function);
+        }
+        else if (strcmp(argv[2], "static_pool-low_high_low_load") == 0)
+        {
+            printf("%s\n", "RUNNING static pool - low high low load");
+            low_high_low_load(pool_size, NULL, num_items, worker_function);
         }
         else if (strcmp(argv[2], "static_pool-inc_background_load") == 0)
         {
