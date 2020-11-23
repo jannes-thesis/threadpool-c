@@ -218,6 +218,7 @@ void tpool_wait(tpool *tpool_ptr)
     // while there are still busy threads or the jobqueue is not empty wait
     while (tpool_ptr->num_busy_threads != 0 || tpool_ptr->jobqueue.size != 0)
     {
+        sleep(1);
     }
 }
 
@@ -431,6 +432,8 @@ static void worker_function(worker_args *args)
         while (jobqueue_ptr->size == 0)
         {
             sleep(1);
+            if (!tpool_ptr->is_static)
+                check_scaling(tpool_ptr, args->wid);
             if (tpool_ptr->stopping)
                 break;
         }
